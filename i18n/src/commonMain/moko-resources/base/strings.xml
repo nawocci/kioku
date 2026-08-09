@@ -609,9 +609,10 @@
     <string name="pref_sync_on_change">Sync automatically on change</string>
     <string name="pref_sync_now">Sync now</string>
     <string name="pref_sync_test_connection">Test connection</string>
-    <string name="sync_test_running">Testing connection…</string>
     <string name="sync_test_success">Connected successfully</string>
     <string name="sync_test_failed">Connection failed</string>
+    <string name="sync_success">Sync complete</string>
+    <string name="sync_failed">Sync failed</string>
     <string name="sync_status_connected">Connected</string>
     <string name="sync_status_not_configured">Not configured</string>
     <string name="sync_status_error">Last sync error</string>

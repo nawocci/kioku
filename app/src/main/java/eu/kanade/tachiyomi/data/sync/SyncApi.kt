@@ -11,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.sync.service.SyncPreferences
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Client for the self-hosted mihon-sync server. Auth is a static API key sent
@@ -24,6 +25,11 @@ class SyncApi(
 ) {
 
     private val client: OkHttpClient = networkHelper.client.newBuilder()
+        // Tighter than NetworkHelper defaults so an unreachable server fails fast
+        // (e.g. the "Test connection" button) instead of hanging ~30s.
+        .connectTimeout(8.seconds)
+        .readTimeout(20.seconds)
+        .writeTimeout(30.seconds)
         .addInterceptor { chain ->
             val request = chain.request().newBuilder()
                 .header("Authorization", "Bearer ${preferences.syncApiKey.get()}")

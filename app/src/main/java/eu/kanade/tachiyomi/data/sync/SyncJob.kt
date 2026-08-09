@@ -32,8 +32,10 @@ class SyncJob(context: Context, workerParams: WorkerParameters) : CoroutineWorke
     companion object {
         const val DEBOUNCE_SECONDS = 15L
 
+        /** Unique work name for manual/pull syncs; observed by the settings UI for progress. */
+        internal const val TAG_MANUAL = "SyncJob:manual"
+
         private const val TAG_DEBOUNCED = "SyncJob"
-        private const val TAG_MANUAL = "SyncJob:manual"
         private const val KEY_PULL = "pull"
 
         fun startDebounced(context: Context) {
