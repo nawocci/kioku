@@ -602,13 +602,14 @@
     <string name="label_sync">Sync</string>
     <string name="pref_sync_summary">Keep library and reading progress in sync across devices</string>
     <string name="pref_sync_server_url">Server URL</string>
-    <string name="pref_sync_server_url_placeholder">https://sync.example.com:8080</string>
+    <string name="pref_sync_server_url_placeholder">https://…</string>
     <string name="pref_sync_api_key">API key</string>
     <string name="pref_sync_api_key_placeholder">mhk_…</string>
     <string name="pref_sync_wifi_only">Sync on Wi-Fi only</string>
     <string name="pref_sync_on_change">Sync automatically on change</string>
     <string name="pref_sync_now">Sync now</string>
     <string name="pref_sync_test_connection">Test connection</string>
+    <string name="sync_test_running">Testing connection…</string>
     <string name="sync_test_success">Connected successfully</string>
     <string name="sync_test_failed">Connection failed</string>
     <string name="sync_status_connected">Connected</string>

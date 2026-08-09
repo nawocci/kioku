@@ -52,6 +52,9 @@ object SettingsSyncScreen : SearchableSettings {
         val lastSyncError by syncPreferences.lastSyncError.collectAsState()
         val configured = serverUrl.isNotBlank() && apiKey.isNotBlank()
 
+        // Show a masked preview of the API key; never the full value.
+        val maskedApiKey = if (apiKey.isBlank()) null else apiKey.take(8) + "*".repeat(8)
+
         val statusText = when {
             !configured -> stringResource(MR.strings.sync_status_not_configured)
             lastSyncError.isNotBlank() ->
@@ -71,7 +74,7 @@ object SettingsSyncScreen : SearchableSettings {
                 Preference.PreferenceItem.EditTextPreference(
                     preference = syncPreferences.syncApiKey,
                     title = stringResource(MR.strings.pref_sync_api_key),
-                    subtitle = null,
+                    subtitle = maskedApiKey,
                     placeholder = stringResource(MR.strings.pref_sync_api_key_placeholder),
                 ),
                 Preference.PreferenceItem.CustomPreference(
@@ -87,7 +90,9 @@ object SettingsSyncScreen : SearchableSettings {
                                 TextButton(
                                     onClick = {
                                         scope.launch {
+                                            val running = context.toast(MR.strings.sync_test_running)
                                             val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
+                                            running.cancel()
                                             context.toast(
                                                 if (ok) {
                                                     MR.strings.sync_test_success
