@@ -30,6 +30,7 @@ fun EditTextPreferenceWidget(
     title: String,
     subtitle: String?,
     icon: ImageVector?,
+    placeholder: String? = null,
     value: String,
     onConfirm: suspend (String) -> Boolean,
 ) {
@@ -55,6 +56,7 @@ fun EditTextPreferenceWidget(
                 OutlinedTextField(
                     value = textFieldValue,
                     onValueChange = { textFieldValue = it },
+                    placeholder = { placeholder?.let { Text(text = it) } },
                     trailingIcon = {
                         if (textFieldValue.text.isBlank()) {
                             Icon(imageVector = Icons.Filled.Error, contentDescription = null)
