@@ -1,0 +1,117 @@
+CREATE TABLE sync_changes(
+    _id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    manga_source INTEGER,
+    manga_url TEXT,
+    chapter_url TEXT,
+    category_name TEXT,
+    pref_key TEXT,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX idx_sync_changes_entity ON sync_changes(entity_type, manga_url, chapter_url);
+
+CREATE TRIGGER sync_manga_inserted AFTER INSERT ON mangas
+WHEN new.favorite = 1
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url)
+    VALUES ('manga', 'upsert', new.source, new.url);
+END;
+
+CREATE TRIGGER sync_manga_updated AFTER UPDATE ON mangas
+WHEN new.is_syncing = 0 AND (
+    new.url != old.url OR
+    new.description != old.description OR
+    new.favorite != old.favorite OR
+    new.title != old.title OR
+    new.notes != old.notes OR
+    new.viewer != old.viewer OR
+    new.chapter_flags != old.chapter_flags OR
+    new.update_strategy != old.update_strategy
+)
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url)
+    VALUES ('manga', 'upsert', new.source, new.url);
+END;
+
+CREATE TRIGGER sync_manga_deleted AFTER DELETE ON mangas
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url)
+    VALUES ('manga', 'delete', old.source, old.url);
+END;
+
+CREATE TRIGGER sync_chapter_updated AFTER UPDATE ON chapters
+WHEN new.is_syncing = 0 AND (
+    new.read != old.read OR
+    new.bookmark != old.bookmark OR
+    new.last_page_read != old.last_page_read
+)
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'chapter', 'upsert', M.source, M.url, new.url
+    FROM mangas M
+    WHERE M._id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_manga_category_inserted AFTER INSERT ON mangas_categories
+WHEN (SELECT is_syncing FROM mangas WHERE _id = new.manga_id) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'upsert', M.source, M.url, C.name
+    FROM mangas M, categories C
+    WHERE M._id = new.manga_id AND C._id = new.category_id;
+END;
+
+CREATE TRIGGER sync_manga_category_deleted AFTER DELETE ON mangas_categories
+WHEN (SELECT is_syncing FROM mangas WHERE _id = old.manga_id) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'delete', M.source, M.url, C.name
+    FROM mangas M, categories C
+    WHERE M._id = old.manga_id AND C._id = old.category_id;
+END;
+
+CREATE TRIGGER sync_category_inserted AFTER INSERT ON categories
+WHEN new._id > 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    VALUES ('category', 'upsert', new.name);
+END;
+
+CREATE TRIGGER sync_category_updated AFTER UPDATE ON categories
+WHEN new._id > 0
+BEGIN
+    -- A rename tombstones the old name (categories are keyed by name).
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    SELECT 'category', 'delete', old.name
+    WHERE new.name != old.name;
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    VALUES ('category', 'upsert', new.name);
+END;
+
+CREATE TRIGGER sync_category_deleted AFTER DELETE ON categories
+WHEN old._id > 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    VALUES ('category', 'delete', old.name);
+END;
+
+CREATE TRIGGER sync_history_inserted AFTER INSERT ON history
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'history', 'upsert', M.source, M.url, C.url
+    FROM chapters C
+    JOIN mangas M ON M._id = C.manga_id
+    WHERE C._id = new.chapter_id AND new.last_read > 0;
+END;
+
+CREATE TRIGGER sync_history_updated AFTER UPDATE OF last_read, time_read ON history
+WHEN new.last_read > 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'history', 'upsert', M.source, M.url, C.url
+    FROM chapters C
+    JOIN mangas M ON M._id = C.manga_id
+    WHERE C._id = new.chapter_id;
+END;
