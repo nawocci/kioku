@@ -35,11 +35,8 @@ class AppUpdateChecker {
 }
 
 val GITHUB_REPO: String by lazy {
-    if (isPreviewBuildType) {
-        "mihonapp/mihon-preview"
-    } else {
-        "mihonapp/mihon"
-    }
+    // Fork: point update checks at this fork's releases, never at upstream Mihon.
+    "nawocci/mihon"
 }
 
 val RELEASE_TAG: String by lazy {
