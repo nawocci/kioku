@@ -34,16 +34,19 @@ class GetApplicationRelease(
             // Preview builds: based on releases tagged as something like "r1234"
             newVersion.toInt() > commitCount
         } else {
-            // Release builds: based on releases tagged as something like "v0.1.2"
+            // Release builds: based on releases tagged as something like "v0.1.2".
+            // Fork-only releases may append extra components (e.g. "v0.1.2.1"),
+            // so compare component-wise with missing components treated as zero.
             val oldVersion = versionName.replace("[^\\d.]".toRegex(), "")
 
             val newSemVer = newVersion.split(".").map { it.toInt() }
             val oldSemVer = oldVersion.split(".").map { it.toInt() }
 
-            oldSemVer.mapIndexed { index, i ->
-                if (newSemVer[index] > i) {
-                    return true
-                }
+            for (index in 0 until maxOf(newSemVer.size, oldSemVer.size)) {
+                val new = newSemVer.getOrElse(index) { 0 }
+                val old = oldSemVer.getOrElse(index) { 0 }
+                if (new > old) return true
+                if (new < old) return false
             }
 
             false
