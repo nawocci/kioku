@@ -113,11 +113,40 @@ jobs:
           name: kioku-foss
           path: kioku-${{ needs.get_tag.outputs.tag }}-foss.apk
 
+  get_changelog:
+    if: github.repository == 'nawocci/kioku'
+    name: Generate changelog
+    runs-on: 'ubuntu-24.04'
+    needs: get_tag
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          previous_tag=$(git describe --tags --abbrev=0 "${{ needs.get_tag.outputs.tag }}"^ 2>/dev/null || true)
+          if [ -z "$previous_tag" ]; then
+            changelog="Initial release."
+          else
+            changelog="$(git log --no-merges --pretty=format:"- %s" "$previous_tag..${{ needs.get_tag.outputs.tag }}")"
+          fi
+          {
+            echo "changelog<<EOF"
+            echo "$changelog"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
   release:
     if: github.repository == 'nawocci/kioku'
     name: Create GitHub Release
     runs-on: ubuntu-24.04
-    needs: [get_tag, build, build_foss]
+    needs: [get_tag, get_changelog, build, build_foss]
     permissions:
       contents: write
 
@@ -142,6 +171,10 @@ jobs:
           name: Kioku ${{ needs.get_tag.outputs.tag }}
           body: |
             Check out the [past release notes](https://github.com/nawocci/kioku/releases) if you're upgrading from an earlier version.
+
+            ## Changelog
+
+            ${{ needs.get_changelog.outputs.changelog }}
 
             <!-->
 
