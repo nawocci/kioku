@@ -36,7 +36,7 @@ class AppUpdateChecker {
 
 val GITHUB_REPO: String by lazy {
     // Fork: point update checks at this fork's releases, never at upstream Mihon.
-    "nawocci/mihon"
+    "nawocci/kioku"
 }
 
 val RELEASE_TAG: String by lazy {

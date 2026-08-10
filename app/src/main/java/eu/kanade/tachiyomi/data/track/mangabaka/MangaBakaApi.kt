@@ -55,7 +55,7 @@ class MangaBakaApi(
                 buildString {
                     append("Kioku/v${BuildConfig.VERSION_NAME} ")
                     append("(${BuildConfig.APPLICATION_ID} ${BuildConfig.COMMIT_SHA}) ")
-                    append("(Android) (https://github.com/nawocci/mihon)")
+                    append("(Android) (https://github.com/nawocci/kioku)")
                 },
             )
             .build()
