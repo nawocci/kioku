@@ -53,9 +53,9 @@ class MangaBakaApi(
             .header(
                 "User-Agent",
                 buildString {
-                    append("Mihon/v${BuildConfig.VERSION_NAME} ")
+                    append("Kioku/v${BuildConfig.VERSION_NAME} ")
                     append("(${BuildConfig.APPLICATION_ID} ${BuildConfig.COMMIT_SHA}) ")
-                    append("(Android) (https://github.com/mihonapp/mihon)")
+                    append("(Android) (https://github.com/nawocci/mihon)")
                 },
             )
             .build()
