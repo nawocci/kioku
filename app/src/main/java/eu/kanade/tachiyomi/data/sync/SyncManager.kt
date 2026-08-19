@@ -50,37 +50,59 @@ class SyncManager(
             if (!syncApi.isConfigured) return false
             ensureDeviceId()
 
-            val watermark = preferences.lastSyncRevision.get()
-            val (changes, maxQueueId) = if (watermark == 0L) {
-                buildSnapshot() to null
+            var watermark = preferences.lastSyncRevision.get()
+            if (watermark == 0L) {
+                val changes = buildSnapshot()
+                val response = syncApi.push(since = watermark, changes = changes)
+                logcat(LogPriority.DEBUG) {
+                    "Sync PUSH snapshot sent=${changes.summary()} resp.rev=${response.rev} " +
+                        "recv=${response.changes.summary()}"
+                }
+                val applied = merger.apply(response.changes)
+                if (applied.newMangaAdded) {
+                    LibraryUpdateJob.startNow(context)
+                }
+                if (applied.pendingRetry && watermarkRetries < MAX_WATERMARK_RETRIES) {
+                    watermarkRetries++
+                    logcat(LogPriority.WARN) { "Sync: holding watermark for retry ($watermarkRetries)" }
+                } else {
+                    watermarkRetries = 0
+                    preferences.lastSyncRevision.set(response.rev)
+                }
             } else {
-                drainQueue()
-            }
+                var iterations = 0
+                while (iterations < MAX_DRAIN_ITERATIONS) {
+                    iterations++
+                    val (changes, maxQueueId) = drainQueue()
+                    val response = syncApi.push(since = watermark, changes = changes)
+                    logcat(LogPriority.DEBUG) {
+                        "Sync PUSH watermark=$watermark sent=${changes.summary()} resp.rev=${response.rev} " +
+                            "recv=${response.changes.summary()}"
+                    }
 
-            val response = syncApi.push(since = watermark, changes = changes)
-            logcat(LogPriority.DEBUG) {
-                "Sync PUSH watermark=$watermark sent=${changes.summary()} resp.rev=${response.rev} " +
-                    "recv=${response.changes.summary()}"
-            }
+                    if (maxQueueId != null) {
+                        database.sync_changesQueries.deleteUpTo(maxQueueId)
+                    }
 
-            // Only delete outbox rows after the server acknowledged them.
-            if (maxQueueId != null) {
-                database.sync_changesQueries.deleteUpTo(maxQueueId)
-            }
+                    val applied = merger.apply(response.changes)
+                    if (applied.newMangaAdded) {
+                        LibraryUpdateJob.startNow(context)
+                    }
 
-            val applied = merger.apply(response.changes)
-            if (applied.newMangaAdded) {
-                // Fetch chapter lists for the new entries; unapplied chapter
-                // state is retried on the next pull (watermark held back).
-                LibraryUpdateJob.startNow(context)
-            }
+                    if (applied.pendingRetry && watermarkRetries < MAX_WATERMARK_RETRIES) {
+                        watermarkRetries++
+                        logcat(LogPriority.WARN) { "Sync: holding watermark for retry ($watermarkRetries)" }
+                    } else {
+                        watermarkRetries = 0
+                        preferences.lastSyncRevision.set(response.rev)
+                        watermark = response.rev
+                    }
 
-            if (applied.pendingRetry && watermarkRetries < MAX_WATERMARK_RETRIES) {
-                watermarkRetries++
-                logcat(LogPriority.WARN) { "Sync: holding watermark for retry ($watermarkRetries)" }
-            } else {
-                watermarkRetries = 0
-                preferences.lastSyncRevision.set(response.rev)
+                    // If queue was empty or partial batch, no more pending items.
+                    if (maxQueueId == null) {
+                        break
+                    }
+                }
             }
 
             preferences.lastSyncTimestamp.set(System.currentTimeMillis())
@@ -93,6 +115,14 @@ class SyncManager(
         } finally {
             mutex.unlock()
         }
+    }
+
+    /** Resets sync watermark and clears the outbox, allowing a fresh snapshot push. */
+    suspend fun resetSync() {
+        preferences.lastSyncRevision.set(0L)
+        preferences.lastSyncTimestamp.set(0L)
+        preferences.lastSyncError.set("")
+        database.sync_changesQueries.clear()
     }
 
     /** Pull-only sync (app start): fetch and apply foreign changes. */
@@ -368,6 +398,7 @@ class SyncManager(
 
     companion object {
         private const val QUEUE_BATCH_SIZE = 500L
+        private const val MAX_DRAIN_ITERATIONS = 20
         private const val MAX_WATERMARK_RETRIES = 3
 
         const val ENTITY_MANGA = "manga"
@@ -385,7 +416,7 @@ class SyncManager(
                 !key.startsWith(SYNC_OWN_PREFIX)
         }
 
-        private const val SYNC_OWN_PREFIX = "sync_"
+        const val SYNC_OWN_PREFIX = "sync_"
     }
 }
 
