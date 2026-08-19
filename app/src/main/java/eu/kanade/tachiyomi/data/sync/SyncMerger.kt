@@ -48,19 +48,26 @@ class SyncMerger(
         var pendingRetry = false
         var newMangaAdded = false
 
-        applyCategories(changes.categories)
+        try {
+            applyCategories(changes.categories)
 
-        for (dto in changes.mangas) {
-            if (applyManga(dto)) newMangaAdded = true
+            for (dto in changes.mangas) {
+                if (applyManga(dto)) newMangaAdded = true
+            }
+            for (dto in changes.chapters) {
+                if (!applyChapter(dto)) pendingRetry = true
+            }
+            for (dto in changes.history) {
+                if (!applyHistory(dto)) pendingRetry = true
+            }
+            applyMangaCategories(changes.mangaCategories)
+            applyPreferences(changes.preferences)
+        } finally {
+            database.transaction {
+                database.mangasQueries.resetIsSyncing()
+                database.chaptersQueries.resetIsSyncing()
+            }
         }
-        for (dto in changes.chapters) {
-            if (!applyChapter(dto)) pendingRetry = true
-        }
-        for (dto in changes.history) {
-            if (!applyHistory(dto)) pendingRetry = true
-        }
-        applyMangaCategories(changes.mangaCategories)
-        applyPreferences(changes.preferences)
 
         return ApplyResult(pendingRetry, newMangaAdded)
     }
@@ -293,41 +300,39 @@ class SyncMerger(
 
     private fun applyPreferences(dtos: List<SyncPreferenceDto>) {
         if (dtos.isEmpty()) return
-        val all = preferenceStore.getAll()
 
         for (dto in dtos) {
             try {
                 if (dto.key in PREFERENCE_DENYLIST ||
                     Preference.isPrivate(dto.key) ||
-                    Preference.isAppState(dto.key)
+                    Preference.isAppState(dto.key) ||
+                    dto.key.startsWith(SyncManager.SYNC_OWN_PREFIX)
                 ) {
                     continue
                 }
-                val current = all[dto.key]
-                if (current == null) continue // set-if-exists, like PreferenceRestorer
 
                 if (dto.deleted) {
-                    deletePreference(dto.key, current)
+                    deletePreference(dto.key)
                     continue
                 }
                 val value = dto.value ?: continue
-                when (current) {
-                    is Int -> value.jsonPrimitive.longOrNull?.let {
+                when (dto.type) {
+                    "int" -> value.jsonPrimitive.longOrNull?.let {
                         preferenceStore.getInt(dto.key).set(it.toInt())
                     }
-                    is Long -> value.jsonPrimitive.longOrNull?.let {
+                    "long" -> value.jsonPrimitive.longOrNull?.let {
                         preferenceStore.getLong(dto.key).set(it)
                     }
-                    is Float -> value.jsonPrimitive.doubleOrNull?.let {
+                    "float" -> value.jsonPrimitive.doubleOrNull?.let {
                         preferenceStore.getFloat(dto.key).set(it.toFloat())
                     }
-                    is Boolean -> value.jsonPrimitive.booleanOrNull?.let {
+                    "boolean" -> value.jsonPrimitive.booleanOrNull?.let {
                         preferenceStore.getBoolean(dto.key).set(it)
                     }
-                    is String -> if (value is JsonPrimitive && value.isString) {
+                    "string" -> if (value is JsonPrimitive && value.isString) {
                         preferenceStore.getString(dto.key).set(value.content)
                     }
-                    is Set<*> -> if (value is JsonArray) {
+                    "stringset" -> if (value is JsonArray) {
                         preferenceStore.getStringSet(dto.key)
                             .set(value.mapNotNull { (it as? JsonPrimitive)?.content }.toSet())
                     }
@@ -338,7 +343,8 @@ class SyncMerger(
         }
     }
 
-    private fun deletePreference(key: String, current: Any) {
+    private fun deletePreference(key: String) {
+        val current = preferenceStore.getAll()[key] ?: return
         when (current) {
             is Int -> preferenceStore.getInt(key).delete()
             is Long -> preferenceStore.getLong(key).delete()
