@@ -1,12 +1,17 @@
 package eu.kanade.presentation.more.settings.screen
 
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -24,6 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.BasePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PrefsHorizontalPadding
@@ -45,6 +55,61 @@ object SettingsSyncScreen : SearchableSettings {
     @ReadOnlyComposable
     @Composable
     override fun getTitleRes() = MR.strings.label_sync
+
+    @Composable
+    override fun RowScope.AppBarAction() {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val syncPreferences = remember { Injekt.get<SyncPreferences>() }
+        val syncApi = remember { Injekt.get<SyncApi>() }
+
+        val scanner = remember(context) {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(context, options)
+        }
+
+        IconButton(
+            onClick = {
+                scanner.startScan()
+                    .addOnSuccessListener { barcode ->
+                        val raw = barcode.rawValue?.trim() ?: return@addOnSuccessListener
+                        val parts = raw.split("|")
+                        if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                            val serverUrl = parts[0].trim().trimEnd('/')
+                            val apiKey = parts[1].trim()
+                            syncPreferences.syncServerUrl.set(serverUrl)
+                            syncPreferences.syncApiKey.set(apiKey)
+
+                            scope.launch {
+                                val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
+                                context.toast(
+                                    if (ok) {
+                                        MR.strings.sync_qr_scanned_success
+                                    } else {
+                                        MR.strings.sync_test_failed
+                                    },
+                                )
+                            }
+                        } else {
+                            context.toast(MR.strings.sync_qr_invalid)
+                        }
+                    }
+                    .addOnFailureListener { e ->
+                        if (e !is ApiException || e.statusCode != CommonStatusCodes.CANCELED) {
+                            context.toast(MR.strings.sync_qr_unavailable)
+                        }
+                    }
+            },
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.QrCodeScanner,
+                contentDescription = stringResource(MR.strings.action_scan_qr),
+            )
+        }
+    }
 
     @Composable
     override fun getPreferences(): List<Preference> {

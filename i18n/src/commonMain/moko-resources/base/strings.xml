@@ -619,6 +619,10 @@
     <string name="pref_sync_reset">Force full re-sync</string>
     <string name="pref_sync_reset_summary">Reset sync watermark and re-upload full snapshot</string>
     <string name="sync_reset_started">Full sync started</string>
+    <string name="action_scan_qr">Scan QR code</string>
+    <string name="sync_qr_scanned_success">Sync configured via QR code</string>
+    <string name="sync_qr_invalid">Invalid sync QR code</string>
+    <string name="sync_qr_unavailable">QR scanner unavailable on this device</string>
 
       <!-- Advanced section -->
     <string name="label_network">Networking</string>
