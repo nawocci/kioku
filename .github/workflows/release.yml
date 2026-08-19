@@ -72,47 +72,6 @@ jobs:
             kioku-x86-${{ needs.get_tag.outputs.tag }}.apk
             kioku-x86_64-${{ needs.get_tag.outputs.tag }}.apk
 
-  build_foss:
-    if: github.repository == 'nawocci/kioku'
-    name: Build (FOSS)
-    runs-on: ubuntu-24.04
-    needs: get_tag
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up JDK
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          java-version-file: .github/.java-version
-          distribution: temurin
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-        with:
-          cache-disabled: true
-
-      - name: Build
-        run: ./gradlew assembleFoss -Penable-updater
-        env:
-          storeFileBase64: ${{ secrets.SIGNING_KEY }}
-          storePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyAlias: ${{ secrets.ALIAS }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Rename APK
-        run: |
-          set -e
-
-          mv app/build/outputs/apk/foss/app-universal-foss.apk kioku-${{ needs.get_tag.outputs.tag }}-foss.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kioku-foss
-          path: kioku-${{ needs.get_tag.outputs.tag }}-foss.apk
-
   get_changelog:
     if: github.repository == 'nawocci/kioku'
     name: Generate changelog
@@ -146,7 +105,7 @@ jobs:
     if: github.repository == 'nawocci/kioku'
     name: Create GitHub Release
     runs-on: ubuntu-24.04
-    needs: [get_tag, get_changelog, build, build_foss]
+    needs: [get_tag, get_changelog, build]
     permissions:
       contents: write
 
@@ -162,7 +121,6 @@ jobs:
           failOnError: false
           name: |
             kioku
-            kioku-foss
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -187,7 +145,6 @@ jobs:
             > ### If you are unsure which version to download then go with `kioku-${{ needs.get_tag.outputs.tag }}.apk`
           files: |
             kioku-${{ needs.get_tag.outputs.tag }}.apk
-            kioku-${{ needs.get_tag.outputs.tag }}-foss.apk
             kioku-arm64-v8a-${{ needs.get_tag.outputs.tag }}.apk
             kioku-armeabi-v7a-${{ needs.get_tag.outputs.tag }}.apk
             kioku-x86-${{ needs.get_tag.outputs.tag }}.apk
