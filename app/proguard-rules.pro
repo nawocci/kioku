@@ -99,3 +99,15 @@
     public <init>();
     public void destroy();
 }
+
+# Google Play Services & ML Kit Code Scanner
+-keep class com.google.android.gms.common.** { *; }
+-keep interface com.google.android.gms.common.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+-keep class com.google.android.gms.vision.** { *; }
+-keep class com.google.mlkit.** { *; }
+-keep interface com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_** { *; }
+-dontwarn com.google.android.gms.**
+-dontwarn com.google.mlkit.**
+

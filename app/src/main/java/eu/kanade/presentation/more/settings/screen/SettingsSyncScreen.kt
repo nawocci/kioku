@@ -63,45 +63,47 @@ object SettingsSyncScreen : SearchableSettings {
         val syncPreferences = remember { Injekt.get<SyncPreferences>() }
         val syncApi = remember { Injekt.get<SyncApi>() }
 
-        val scanner = remember(context) {
-            val options = GmsBarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                .enableAutoZoom()
-                .build()
-            GmsBarcodeScanning.getClient(context, options)
-        }
-
         IconButton(
             onClick = {
-                scanner.startScan()
-                    .addOnSuccessListener { barcode ->
-                        val raw = barcode.rawValue?.trim() ?: return@addOnSuccessListener
-                        val parts = raw.split("|")
-                        if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
-                            val serverUrl = parts[0].trim().trimEnd('/')
-                            val apiKey = parts[1].trim()
-                            syncPreferences.syncServerUrl.set(serverUrl)
-                            syncPreferences.syncApiKey.set(apiKey)
+                runCatching {
+                    val options = GmsBarcodeScannerOptions.Builder()
+                        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                        .enableAutoZoom()
+                        .build()
+                    val scanner = GmsBarcodeScanning.getClient(context, options)
 
-                            scope.launch {
-                                val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
-                                context.toast(
-                                    if (ok) {
-                                        MR.strings.sync_qr_scanned_success
-                                    } else {
-                                        MR.strings.sync_test_failed
-                                    },
-                                )
+                    scanner.startScan()
+                        .addOnSuccessListener { barcode ->
+                            val raw = barcode.rawValue?.trim() ?: return@addOnSuccessListener
+                            val parts = raw.split("|")
+                            if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                                val serverUrl = parts[0].trim().trimEnd('/')
+                                val apiKey = parts[1].trim()
+                                syncPreferences.syncServerUrl.set(serverUrl)
+                                syncPreferences.syncApiKey.set(apiKey)
+
+                                scope.launch {
+                                    val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
+                                    context.toast(
+                                        if (ok) {
+                                            MR.strings.sync_qr_scanned_success
+                                        } else {
+                                            MR.strings.sync_test_failed
+                                        },
+                                    )
+                                }
+                            } else {
+                                context.toast(MR.strings.sync_qr_invalid)
                             }
-                        } else {
-                            context.toast(MR.strings.sync_qr_invalid)
                         }
-                    }
-                    .addOnFailureListener { e ->
-                        if (e !is ApiException || e.statusCode != CommonStatusCodes.CANCELED) {
-                            context.toast(MR.strings.sync_qr_unavailable)
+                        .addOnFailureListener { e ->
+                            if (e !is ApiException || e.statusCode != CommonStatusCodes.CANCELED) {
+                                context.toast(MR.strings.sync_qr_unavailable)
+                            }
                         }
-                    }
+                }.onFailure {
+                    context.toast(MR.strings.sync_qr_unavailable)
+                }
             },
         ) {
             Icon(
