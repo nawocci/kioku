@@ -616,6 +616,9 @@
     <string name="sync_status_connected">Connected</string>
     <string name="sync_status_not_configured">Not configured</string>
     <string name="sync_status_error">Last sync error</string>
+    <string name="pref_sync_reset">Force full re-sync</string>
+    <string name="pref_sync_reset_summary">Reset sync watermark and re-upload full snapshot</string>
+    <string name="sync_reset_started">Full sync started</string>
 
       <!-- Advanced section -->
     <string name="label_network">Networking</string>

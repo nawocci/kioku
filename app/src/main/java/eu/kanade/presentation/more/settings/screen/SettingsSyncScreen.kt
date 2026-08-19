@@ -29,6 +29,7 @@ import eu.kanade.presentation.more.settings.widget.BasePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PrefsHorizontalPadding
 import eu.kanade.tachiyomi.data.sync.SyncApi
 import eu.kanade.tachiyomi.data.sync.SyncJob
+import eu.kanade.tachiyomi.data.sync.SyncManager
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.system.workManager
 import kotlinx.coroutines.launch
@@ -51,6 +52,7 @@ object SettingsSyncScreen : SearchableSettings {
         return listOf(
             getServerGroup(syncPreferences),
             getBehaviorGroup(syncPreferences),
+            getAdvancedGroup(syncPreferences),
         )
     }
 
@@ -116,6 +118,7 @@ object SettingsSyncScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_sync_api_key),
                     subtitle = maskedApiKey,
                     placeholder = stringResource(MR.strings.pref_sync_api_key_placeholder),
+                    isSensitive = true,
                 ),
                 Preference.PreferenceItem.CustomPreference(
                     title = stringResource(MR.strings.pref_sync_now),
@@ -201,6 +204,29 @@ object SettingsSyncScreen : SearchableSettings {
                 Preference.PreferenceItem.SwitchPreference(
                     preference = syncPreferences.syncWifiOnly,
                     title = stringResource(MR.strings.pref_sync_wifi_only),
+                ),
+            ),
+        )
+    }
+
+    @Composable
+    private fun getAdvancedGroup(syncPreferences: SyncPreferences): Preference.PreferenceGroup {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_category_advanced),
+            preferenceItems = listOf(
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(MR.strings.pref_sync_reset),
+                    subtitle = stringResource(MR.strings.pref_sync_reset_summary),
+                    enabled = syncPreferences.isConfigured(),
+                    onClick = {
+                        scope.launch {
+                            SyncManager(context).resetSync()
+                            SyncJob.startNow(context)
+                            context.toast(MR.strings.sync_reset_started)
+                        }
+                    },
                 ),
             ),
         )
