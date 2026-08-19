@@ -88,6 +88,19 @@ BEGIN
     WHERE new.name != old.name;
     INSERT INTO sync_changes(entity_type, change_type, category_name)
     VALUES ('category', 'upsert', new.name);
+
+    -- Re-link existing mangas to the new category name on wire
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'delete', M.source, M.url, old.name
+    FROM mangas_categories MC
+    JOIN mangas M ON M._id = MC.manga_id
+    WHERE MC.category_id = new._id AND new.name != old.name;
+
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'upsert', M.source, M.url, new.name
+    FROM mangas_categories MC
+    JOIN mangas M ON M._id = MC.manga_id
+    WHERE MC.category_id = new._id AND new.name != old.name;
 END;
 
 CREATE TRIGGER sync_category_deleted AFTER DELETE ON categories
@@ -98,6 +111,7 @@ BEGIN
 END;
 
 CREATE TRIGGER sync_history_inserted AFTER INSERT ON history
+WHEN (SELECT M.is_syncing FROM mangas M JOIN chapters C ON C.manga_id = M._id WHERE C._id = new.chapter_id) = 0
 BEGIN
     INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
     SELECT 'history', 'upsert', M.source, M.url, C.url
@@ -107,7 +121,7 @@ BEGIN
 END;
 
 CREATE TRIGGER sync_history_updated AFTER UPDATE OF last_read, time_read ON history
-WHEN new.last_read > 0
+WHEN new.last_read > 0 AND (SELECT M.is_syncing FROM mangas M JOIN chapters C ON C.manga_id = M._id WHERE C._id = new.chapter_id) = 0
 BEGIN
     INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
     SELECT 'history', 'upsert', M.source, M.url, C.url
