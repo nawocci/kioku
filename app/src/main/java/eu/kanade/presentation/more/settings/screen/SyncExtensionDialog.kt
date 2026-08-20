@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import eu.kanade.presentation.browse.components.ExtensionIcon
 import eu.kanade.tachiyomi.extension.model.Extension
 import tachiyomi.i18n.MR
@@ -35,8 +36,15 @@ fun SyncExtensionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
         title = {
-            Text(text = stringResource(MR.strings.sync_missing_extensions_title))
+            Text(
+                text = stringResource(MR.strings.sync_missing_extensions_title),
+                style = MaterialTheme.typography.titleLarge,
+            )
         },
         text = {
             Column(

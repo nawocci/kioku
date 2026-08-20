@@ -4,6 +4,7 @@ import android.content.Context
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
+import eu.kanade.tachiyomi.data.library.MetadataUpdateJob
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
@@ -60,7 +61,7 @@ class SyncManager(
                 }
                 val applied = merger.apply(response.changes)
                 if (applied.newMangaAdded) {
-                    LibraryUpdateJob.startNow(context)
+                    MetadataUpdateJob.startNow(context)
                 }
                 if (applied.pendingRetry && watermarkRetries < MAX_WATERMARK_RETRIES) {
                     watermarkRetries++
@@ -86,7 +87,7 @@ class SyncManager(
 
                     val applied = merger.apply(response.changes)
                     if (applied.newMangaAdded) {
-                        LibraryUpdateJob.startNow(context)
+                        MetadataUpdateJob.startNow(context)
                     }
 
                     if (applied.pendingRetry && watermarkRetries < MAX_WATERMARK_RETRIES) {
@@ -143,7 +144,7 @@ class SyncManager(
                 "Sync PULL applied pending=${applied.pendingRetry} newManga=${applied.newMangaAdded}"
             }
             if (applied.newMangaAdded) {
-                LibraryUpdateJob.startNow(context)
+                MetadataUpdateJob.startNow(context)
             }
 
             if (applied.pendingRetry && watermarkRetries < MAX_WATERMARK_RETRIES) {

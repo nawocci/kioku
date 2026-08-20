@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -48,6 +49,7 @@ import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.system.workManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import tachiyomi.data.Database
 import tachiyomi.domain.sync.service.SyncPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -149,9 +151,11 @@ object SettingsSyncScreen : SearchableSettings {
                 extensions = extensions,
                 onInstallAll = {
                     val resolver = Injekt.get<SyncExtensionResolver>()
-                    resolver.installExtensions(extensions)
                     missingExtensionsState.value = null
-                    SyncJob.startNow(context)
+                    resolver.installExtensions(extensions) {
+                        eu.kanade.tachiyomi.data.library.MetadataUpdateJob.startNow(context)
+                        SyncJob.startNow(context)
+                    }
                 },
                 onDismiss = {
                     missingExtensionsState.value = null
@@ -263,7 +267,18 @@ object SettingsSyncScreen : SearchableSettings {
                                 SegmentedButton(
                                     modifier = Modifier.fillMaxHeight(),
                                     checked = false,
-                                    onCheckedChange = { SyncJob.startNow(context) },
+                                    onCheckedChange = {
+                                        scope.launch {
+                                            triggerConnectAndSync(
+                                                context = context,
+                                                syncApi = syncApi,
+                                                syncPreferences = syncPreferences,
+                                                onShowMissing = { missing ->
+                                                    missingExtensionsState.value = missing
+                                                },
+                                            )
+                                        }
+                                    },
                                     enabled = !busy && configured,
                                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                                     icon = {
@@ -301,22 +316,28 @@ object SettingsSyncScreen : SearchableSettings {
         }
 
         val watermark = syncPreferences.lastSyncRevision.get()
-        if (watermark == 0L) {
-            val pull = runCatching { syncApi.pull(0L) }.getOrNull()
-            if (pull != null) {
-                if (pull.changes.extensionStores.isNotEmpty()) {
-                    val merger = SyncMerger()
-                    merger.apply(SyncChangeSetDto(extensionStores = pull.changes.extensionStores))
-                }
-                val sourceIds = pull.changes.mangas.map { it.sourceId }.toSet()
-                val resolver = Injekt.get<SyncExtensionResolver>()
-                val missing = resolver.findMissingExtensions(sourceIds)
-                if (missing.isNotEmpty()) {
-                    onShowMissing(missing)
-                    return
-                }
+        val pull = if (watermark == 0L) runCatching { syncApi.pull(0L) }.getOrNull() else null
+        if (pull != null && pull.changes.extensionStores.isNotEmpty()) {
+            val merger = SyncMerger()
+            merger.apply(SyncChangeSetDto(extensionStores = pull.changes.extensionStores))
+        }
+
+        val remoteSourceIds = pull?.changes?.mangas?.map { it.sourceId }?.toSet() ?: emptySet()
+        val localSourceIds = runCatching {
+            Injekt.get<tachiyomi.data.Database>().mangasQueries.getFavorites().awaitAsList().map { it.source }.toSet()
+        }.getOrDefault(emptySet())
+
+        val allSourceIds = remoteSourceIds + localSourceIds
+        if (allSourceIds.isNotEmpty()) {
+            val resolver = Injekt.get<SyncExtensionResolver>()
+            val missing = resolver.findMissingExtensions(allSourceIds)
+            if (missing.isNotEmpty()) {
+                onShowMissing(missing)
+                return
             }
-        } else {
+        }
+
+        if (watermark > 0L) {
             context.toast(MR.strings.sync_test_success)
         }
         SyncJob.startNow(context)

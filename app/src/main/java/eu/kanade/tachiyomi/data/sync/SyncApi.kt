@@ -31,10 +31,13 @@ class SyncApi(
         .readTimeout(20.seconds)
         .writeTimeout(30.seconds)
         .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
+            val requestBuilder = chain.request().newBuilder()
                 .header("Authorization", "Bearer ${preferences.syncApiKey.get()}")
-                .build()
-            chain.proceed(request)
+            val deviceId = preferences.syncDeviceId.get()
+            if (deviceId.isNotBlank()) {
+                requestBuilder.header("X-Device-ID", deviceId)
+            }
+            chain.proceed(requestBuilder.build())
         }
         .build()
 

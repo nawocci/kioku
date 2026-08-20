@@ -20,6 +20,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 
 internal class GuidesStep(
     private val onRestoreBackup: () -> Unit,
+    private val onSync: () -> Unit,
 ) : OnboardingStep {
 
     override val isComplete: Boolean = true
@@ -52,6 +53,12 @@ internal class GuidesStep(
             ) {
                 Text(stringResource(MR.strings.pref_restore_backup))
             }
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onSync,
+            ) {
+                Text(stringResource(MR.strings.onboarding_action_sync))
+            }
         }
     }
 }
@@ -64,6 +71,7 @@ private fun GuidesStepPreview() {
     TachiyomiPreviewTheme {
         GuidesStep(
             onRestoreBackup = {},
+            onSync = {},
         ).Content()
     }
 }

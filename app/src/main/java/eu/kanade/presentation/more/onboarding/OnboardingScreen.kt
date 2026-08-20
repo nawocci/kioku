@@ -28,6 +28,7 @@ import tachiyomi.presentation.core.screens.InfoScreen
 fun OnboardingScreen(
     onComplete: () -> Unit,
     onRestoreBackup: () -> Unit,
+    onSync: () -> Unit,
 ) {
     val slideDistance = rememberSlideDistance()
 
@@ -37,7 +38,10 @@ fun OnboardingScreen(
             ThemeStep(),
             StorageStep(),
             PermissionStep(),
-            GuidesStep(onRestoreBackup = onRestoreBackup),
+            GuidesStep(
+                onRestoreBackup = onRestoreBackup,
+                onSync = onSync,
+            ),
         )
     }
     val isLastStep = currentStep == steps.lastIndex

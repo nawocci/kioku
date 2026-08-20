@@ -120,7 +120,7 @@ class AppModule(val app: Application) : InjektModule {
 
         addSingletonFactory { SyncApi(get(), get(), get()) }
         addSingletonFactory { SyncManager(app) }
-        addSingletonFactory { SyncExtensionResolver(get()) }
+        addSingletonFactory { SyncExtensionResolver(get(), get(), get()) }
 
         addSingletonFactory<SourceManager> { AndroidSourceManager(app, get(), get()) }
         addSingletonFactory { ExtensionManager(app) }

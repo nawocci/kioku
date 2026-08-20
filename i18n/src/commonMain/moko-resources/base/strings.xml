@@ -201,6 +201,7 @@
     <string name="onboarding_permission_action_grant">Grant</string>
     <string name="onboarding_guides_new_user">New to %s? We recommend checking out the getting started guide.</string>
     <string name="onboarding_guides_returning_user">Reinstalling %s?</string>
+    <string name="onboarding_action_sync">Sync from server</string>
 
     <!-- Preferences -->
       <!-- Subsections -->
