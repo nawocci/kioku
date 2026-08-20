@@ -13,6 +13,7 @@ data class SyncMangaDto(
     @SerialName("source_id") val sourceId: Long,
     val url: String,
     val title: String = "",
+    @SerialName("thumbnail_url") val thumbnailUrl: String? = null,
     // favorite and updateStrategy must not have defaults: kotlinx omits
     // default-valued properties and the server would read them as false / "".
     val favorite: Boolean,
@@ -70,6 +71,15 @@ data class SyncPreferenceDto(
 )
 
 @Serializable
+data class SyncExtensionStoreDto(
+    @SerialName("index_url") val indexUrl: String,
+    val name: String = "",
+    @SerialName("badge_label") val badgeLabel: String = "",
+    @SerialName("signing_key") val signingKey: String = "",
+    val deleted: Boolean = false,
+)
+
+@Serializable
 data class SyncChangeSetDto(
     val mangas: List<SyncMangaDto> = emptyList(),
     val chapters: List<SyncChapterDto> = emptyList(),
@@ -77,6 +87,7 @@ data class SyncChangeSetDto(
     @SerialName("manga_categories") val mangaCategories: List<SyncMangaCategoryDto> = emptyList(),
     val history: List<SyncHistoryDto> = emptyList(),
     val preferences: List<SyncPreferenceDto> = emptyList(),
+    @SerialName("extension_stores") val extensionStores: List<SyncExtensionStoreDto> = emptyList(),
 )
 
 @Serializable

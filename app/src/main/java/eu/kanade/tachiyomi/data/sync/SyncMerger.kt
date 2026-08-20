@@ -20,6 +20,7 @@ import tachiyomi.data.Database
 import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.library.service.LibraryPreferences
+import mihon.domain.extension.interactor.UpdateExtensionStores
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.Date
@@ -49,6 +50,7 @@ class SyncMerger(
         var newMangaAdded = false
 
         try {
+            applyExtensionStores(changes.extensionStores)
             applyCategories(changes.categories)
 
             for (dto in changes.mangas) {
@@ -71,6 +73,38 @@ class SyncMerger(
 
         return ApplyResult(pendingRetry, newMangaAdded)
     }
+
+    // region Extension Stores
+
+    private suspend fun applyExtensionStores(dtos: List<SyncExtensionStoreDto>) {
+        if (dtos.isEmpty()) return
+        var storesChanged = false
+        for (dto in dtos) {
+            if (dto.deleted) {
+                database.extension_storeQueries.delete(dto.indexUrl)
+                storesChanged = true
+            } else {
+                database.extension_storeQueries.upsert(
+                    indexUrl = dto.indexUrl,
+                    name = dto.name,
+                    badgeLabel = dto.badgeLabel,
+                    signingKey = dto.signingKey,
+                    contactWebsite = "",
+                    contactDiscord = null,
+                    isLegacy = false,
+                    extensionListUrl = null,
+                )
+                storesChanged = true
+            }
+        }
+        if (storesChanged) {
+            runCatching {
+                Injekt.get<UpdateExtensionStores>()()
+            }
+        }
+    }
+
+    // endregion
 
     // region Categories
 
@@ -128,7 +162,7 @@ class SyncMerger(
                 genre = null,
                 title = dto.title,
                 status = 0,
-                thumbnailUrl = null,
+                thumbnailUrl = dto.thumbnailUrl,
                 favorite = dto.favorite,
                 lastUpdate = 0,
                 nextUpdate = 0,
@@ -160,7 +194,7 @@ class SyncMerger(
             genre = null,
             title = if (remoteWins) dto.title else null,
             status = null,
-            thumbnailUrl = null,
+            thumbnailUrl = if (remoteWins && dto.thumbnailUrl != null) dto.thumbnailUrl else null,
             favorite = favorite,
             lastUpdate = null,
             nextUpdate = null,

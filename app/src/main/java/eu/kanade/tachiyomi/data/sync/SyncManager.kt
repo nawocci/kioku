@@ -183,6 +183,7 @@ class SyncManager(
         val mangaCategories = LinkedHashMap<String, SyncMangaCategoryDto>()
         val history = LinkedHashMap<Triple<Long, String, String>, SyncHistoryDto>()
         val prefs = LinkedHashMap<String, SyncPreferenceDto>()
+        val extensionStores = LinkedHashMap<String, SyncExtensionStoreDto>()
 
         for (row in batch) {
             when (row.entity_type) {
@@ -202,6 +203,8 @@ class SyncManager(
                     ?.let { history[Triple(it.mangaSourceId, it.mangaUrl, it.chapterUrl)] = it }
                 ENTITY_PREFERENCE -> resolvePreference(row.pref_key, row.change_type)
                     ?.let { prefs[it.key] = it }
+                ENTITY_EXTENSION_STORE -> resolveExtensionStore(row.extension_store_url, row.change_type)
+                    ?.let { extensionStores[it.indexUrl] = it }
             }
         }
 
@@ -212,6 +215,7 @@ class SyncManager(
             mangaCategories = mangaCategories.values.toList(),
             history = history.values.toList(),
             preferences = prefs.values.toList(),
+            extensionStores = extensionStores.values.toList(),
         ) to batch.last()._id
     }
 
@@ -231,6 +235,7 @@ class SyncManager(
             sourceId = source,
             url = url,
             title = title,
+            thumbnailUrl = thumbnail_url,
             favorite = favorite,
             chapterFlags = chapter_flags,
             viewerFlags = viewer,
@@ -310,6 +315,20 @@ class SyncManager(
         return SyncPreferenceDto(key = key, type = type, value = json)
     }
 
+    private suspend fun resolveExtensionStore(indexUrl: String?, changeType: String): SyncExtensionStoreDto? {
+        if (indexUrl == null) return null
+        if (changeType == "delete") return SyncExtensionStoreDto(indexUrl = indexUrl, deleted = true)
+        val dbStore = database.extension_storeQueries.get(indexUrl).awaitAsOneOrNull()
+            ?: return SyncExtensionStoreDto(indexUrl = indexUrl, deleted = true)
+        return SyncExtensionStoreDto(
+            indexUrl = dbStore.index_url,
+            name = dbStore.name,
+            badgeLabel = dbStore.badge_label,
+            signingKey = dbStore.signing_key,
+            deleted = false,
+        )
+    }
+
     // endregion
 
     // region Snapshot (first sync)
@@ -384,6 +403,17 @@ class SyncManager(
                 }
             }
 
+        val extensionStores = database.extension_storeQueries.getAll().awaitAsList()
+            .map {
+                SyncExtensionStoreDto(
+                    indexUrl = it.index_url,
+                    name = it.name,
+                    badgeLabel = it.badge_label,
+                    signingKey = it.signing_key,
+                    deleted = false,
+                )
+            }
+
         return SyncChangeSetDto(
             mangas = mangas,
             chapters = chapters,
@@ -391,6 +421,7 @@ class SyncManager(
             mangaCategories = mangaCategories,
             history = history,
             preferences = preferences,
+            extensionStores = extensionStores,
         )
     }
 
@@ -407,6 +438,7 @@ class SyncManager(
         const val ENTITY_MANGA_CATEGORY = "manga_category"
         const val ENTITY_HISTORY = "history"
         const val ENTITY_PREFERENCE = "preference"
+        const val ENTITY_EXTENSION_STORE = "extension_store"
 
         /** Private (secrets) and app-state keys never leave the device. */
         fun isSyncablePreference(key: String): Boolean {
@@ -422,5 +454,5 @@ class SyncManager(
 
 private fun SyncChangeSetDto.summary(): String {
     return "{mangas=${mangas.size},chapters=${chapters.size},categories=${categories.size}," +
-        "links=${mangaCategories.size},history=${history.size},prefs=${preferences.size}}"
+        "links=${mangaCategories.size},history=${history.size},prefs=${preferences.size},stores=${extensionStores.size}}"
 }

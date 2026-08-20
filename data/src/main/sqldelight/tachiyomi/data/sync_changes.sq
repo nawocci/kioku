@@ -12,6 +12,7 @@ CREATE TABLE sync_changes(
     chapter_url TEXT,
     category_name TEXT,
     pref_key TEXT,
+    extension_store_url TEXT,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
@@ -118,6 +119,25 @@ BEGIN
     VALUES ('category', 'delete', old.name);
 END;
 
+-- Extension store triggers
+CREATE TRIGGER sync_extension_store_inserted AFTER INSERT ON extension_store
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, extension_store_url)
+    VALUES ('extension_store', 'upsert', new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_updated AFTER UPDATE ON extension_store
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, extension_store_url)
+    VALUES ('extension_store', 'upsert', new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_deleted AFTER DELETE ON extension_store
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, extension_store_url)
+    VALUES ('extension_store', 'delete', old.index_url);
+END;
+
 -- History resets (last_read = 0) intentionally don't propagate: the server
 -- merges history with MAX semantics. Guarded by is_syncing = 0 so applied foreign
 -- history doesn't echo back into the outbox.
@@ -159,3 +179,4 @@ SELECT COUNT(*) FROM sync_changes;
 
 clear:
 DELETE FROM sync_changes;
+
