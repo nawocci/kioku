@@ -50,7 +50,15 @@ import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
+import eu.kanade.tachiyomi.data.sync.SyncChangeSetDto
+import eu.kanade.tachiyomi.data.sync.SyncExtensionResolver
+import eu.kanade.tachiyomi.data.sync.SyncMerger
+import eu.kanade.tachiyomi.extension.model.Extension
+import kotlinx.coroutines.flow.MutableStateFlow
+
 object SettingsSyncScreen : SearchableSettings {
+
+    private val missingExtensionsState = MutableStateFlow<List<Extension.Available>?>(null)
 
     @ReadOnlyComposable
     @Composable
@@ -83,12 +91,13 @@ object SettingsSyncScreen : SearchableSettings {
                                 syncPreferences.syncApiKey.set(apiKey)
 
                                 scope.launch {
-                                    val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
-                                    context.toast(
-                                        if (ok) {
-                                            MR.strings.sync_qr_scanned_success
-                                        } else {
-                                            MR.strings.sync_test_failed
+                                    context.toast(MR.strings.sync_qr_scanned_success)
+                                    triggerConnectAndSync(
+                                        context = context,
+                                        syncApi = syncApi,
+                                        syncPreferences = syncPreferences,
+                                        onShowMissing = { missing ->
+                                            missingExtensionsState.value = missing
                                         },
                                     )
                                 }
@@ -135,6 +144,23 @@ object SettingsSyncScreen : SearchableSettings {
         val lastSyncError by syncPreferences.lastSyncError.collectAsState()
         val configured = serverUrl.isNotBlank() && apiKey.isNotBlank()
 
+        val missingExtensions by missingExtensionsState.collectAsState()
+        missingExtensions?.let { extensions ->
+            SyncExtensionDialog(
+                extensions = extensions,
+                onInstallAll = {
+                    val resolver = Injekt.get<SyncExtensionResolver>()
+                    resolver.installExtensions(extensions)
+                    missingExtensionsState.value = null
+                    SyncJob.startNow(context)
+                },
+                onDismiss = {
+                    missingExtensionsState.value = null
+                    SyncJob.startNow(context)
+                },
+            )
+        }
+
         // Show a masked preview of the API key; never the full value.
         val maskedApiKey = if (apiKey.isBlank()) null else apiKey.take(8) + "*".repeat(8)
 
@@ -145,7 +171,7 @@ object SettingsSyncScreen : SearchableSettings {
         val syncing = manualWork.any {
             it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
         }
-        // True while a "test connection" request is in flight.
+        // True while a connect/test request is in flight.
         var testing by remember { mutableStateOf(false) }
         val busy = testing || syncing
 
@@ -204,19 +230,18 @@ object SettingsSyncScreen : SearchableSettings {
                                     onCheckedChange = {
                                         scope.launch {
                                             testing = true
-                                            val ok = runCatching { syncApi.authCheck() }
-                                                .getOrDefault(false)
-                                            testing = false
-                                            context.toast(
-                                                if (ok) {
-                                                    MR.strings.sync_test_success
-                                                } else {
-                                                    MR.strings.sync_test_failed
+                                            triggerConnectAndSync(
+                                                context = context,
+                                                syncApi = syncApi,
+                                                syncPreferences = syncPreferences,
+                                                onShowMissing = { missing ->
+                                                    missingExtensionsState.value = missing
                                                 },
                                             )
+                                            testing = false
                                         }
                                     },
-                                    enabled = !busy,
+                                    enabled = !busy && configured,
                                     shape = SegmentedButtonDefaults.itemShape(0, 2),
                                     icon = {
                                         if (testing) {
@@ -229,13 +254,18 @@ object SettingsSyncScreen : SearchableSettings {
                                         }
                                     },
                                 ) {
-                                    Text(stringResource(MR.strings.pref_sync_test_connection))
+                                    val buttonLabel = if (lastSyncTimestamp > 0) {
+                                        MR.strings.pref_sync_test_connection
+                                    } else {
+                                        MR.strings.pref_sync_connect_sync
+                                    }
+                                    Text(stringResource(buttonLabel))
                                 }
                                 SegmentedButton(
                                     modifier = Modifier.fillMaxHeight(),
                                     checked = false,
                                     onCheckedChange = { SyncJob.startNow(context) },
-                                    enabled = !busy,
+                                    enabled = !busy && configured,
                                     shape = SegmentedButtonDefaults.itemShape(1, 2),
                                     icon = {
                                         if (syncing) {
@@ -257,6 +287,40 @@ object SettingsSyncScreen : SearchableSettings {
                 Preference.PreferenceItem.InfoPreference(title = statusText),
             ),
         )
+    }
+
+    private suspend fun triggerConnectAndSync(
+        context: android.content.Context,
+        syncApi: SyncApi,
+        syncPreferences: SyncPreferences,
+        onShowMissing: (List<Extension.Available>) -> Unit,
+    ) {
+        val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
+        if (!ok) {
+            context.toast(MR.strings.sync_test_failed)
+            return
+        }
+
+        val watermark = syncPreferences.lastSyncRevision.get()
+        if (watermark == 0L) {
+            val pull = runCatching { syncApi.pull(0L) }.getOrNull()
+            if (pull != null) {
+                if (pull.changes.extensionStores.isNotEmpty()) {
+                    val merger = SyncMerger()
+                    merger.apply(SyncChangeSetDto(extensionStores = pull.changes.extensionStores))
+                }
+                val sourceIds = pull.changes.mangas.map { it.sourceId }.toSet()
+                val resolver = Injekt.get<SyncExtensionResolver>()
+                val missing = resolver.findMissingExtensions(sourceIds)
+                if (missing.isNotEmpty()) {
+                    onShowMissing(missing)
+                    return
+                }
+            }
+        } else {
+            context.toast(MR.strings.sync_test_success)
+        }
+        SyncJob.startNow(context)
     }
 
     @Composable
@@ -299,3 +363,4 @@ object SettingsSyncScreen : SearchableSettings {
         )
     }
 }
+

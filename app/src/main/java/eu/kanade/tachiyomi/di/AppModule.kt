@@ -17,6 +17,8 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.sync.SyncApi
+import eu.kanade.tachiyomi.data.sync.SyncExtensionResolver
+import eu.kanade.tachiyomi.data.sync.SyncManager
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.network.JavaScriptEngine
@@ -117,6 +119,8 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { JavaScriptEngine(app) }
 
         addSingletonFactory { SyncApi(get(), get(), get()) }
+        addSingletonFactory { SyncManager(app) }
+        addSingletonFactory { SyncExtensionResolver(get()) }
 
         addSingletonFactory<SourceManager> { AndroidSourceManager(app, get(), get()) }
         addSingletonFactory { ExtensionManager(app) }

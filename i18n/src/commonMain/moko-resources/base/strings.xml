@@ -623,6 +623,11 @@
     <string name="sync_qr_scanned_success">Sync configured via QR code</string>
     <string name="sync_qr_invalid">Invalid sync QR code</string>
     <string name="sync_qr_unavailable">QR scanner unavailable on this device</string>
+    <string name="sync_missing_extensions_title">Install Missing Extensions</string>
+    <string name="sync_missing_extensions_subtitle">Your synced library uses extensions not currently installed on this device.</string>
+    <string name="sync_missing_extensions_install_all">Install all</string>
+    <string name="sync_missing_extensions_skip">Skip</string>
+    <string name="pref_sync_connect_sync">Connect &amp; Sync</string>
 
       <!-- Advanced section -->
     <string name="label_network">Networking</string>
