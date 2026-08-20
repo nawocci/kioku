@@ -32,8 +32,8 @@ android {
     defaultConfig {
         applicationId = "app.kioku"
 
-        versionCode = 30
-        versionName = "0.20.4.1"
+        versionCode = 31
+        versionName = "0.20.4.2"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getLatestCommitSha()}\"")
