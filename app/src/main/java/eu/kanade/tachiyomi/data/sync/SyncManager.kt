@@ -235,7 +235,6 @@ class SyncManager(
             sourceId = source,
             url = url,
             title = title,
-            thumbnailUrl = thumbnail_url,
             favorite = favorite,
             chapterFlags = chapter_flags,
             viewerFlags = viewer,

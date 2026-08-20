@@ -13,7 +13,6 @@ data class SyncMangaDto(
     @SerialName("source_id") val sourceId: Long,
     val url: String,
     val title: String = "",
-    @SerialName("thumbnail_url") val thumbnailUrl: String? = null,
     // favorite and updateStrategy must not have defaults: kotlinx omits
     // default-valued properties and the server would read them as false / "".
     val favorite: Boolean,

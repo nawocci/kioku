@@ -13,6 +13,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import logcat.LogPriority
+import mihon.domain.extension.interactor.UpdateExtensionStores
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.system.logcat
@@ -20,7 +21,6 @@ import tachiyomi.data.Database
 import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.library.service.LibraryPreferences
-import mihon.domain.extension.interactor.UpdateExtensionStores
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.Date
@@ -162,7 +162,7 @@ class SyncMerger(
                 genre = null,
                 title = dto.title,
                 status = 0,
-                thumbnailUrl = dto.thumbnailUrl,
+                thumbnailUrl = null,
                 favorite = dto.favorite,
                 lastUpdate = 0,
                 nextUpdate = 0,
@@ -194,7 +194,7 @@ class SyncMerger(
             genre = null,
             title = if (remoteWins) dto.title else null,
             status = null,
-            thumbnailUrl = if (remoteWins && dto.thumbnailUrl != null) dto.thumbnailUrl else null,
+            thumbnailUrl = null,
             favorite = favorite,
             lastUpdate = null,
             nextUpdate = null,

@@ -38,10 +38,15 @@ import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.BasePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PrefsHorizontalPadding
 import eu.kanade.tachiyomi.data.sync.SyncApi
+import eu.kanade.tachiyomi.data.sync.SyncChangeSetDto
+import eu.kanade.tachiyomi.data.sync.SyncExtensionResolver
 import eu.kanade.tachiyomi.data.sync.SyncJob
 import eu.kanade.tachiyomi.data.sync.SyncManager
+import eu.kanade.tachiyomi.data.sync.SyncMerger
+import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.system.workManager
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import tachiyomi.domain.sync.service.SyncPreferences
 import tachiyomi.i18n.MR
@@ -49,12 +54,6 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-
-import eu.kanade.tachiyomi.data.sync.SyncChangeSetDto
-import eu.kanade.tachiyomi.data.sync.SyncExtensionResolver
-import eu.kanade.tachiyomi.data.sync.SyncMerger
-import eu.kanade.tachiyomi.extension.model.Extension
-import kotlinx.coroutines.flow.MutableStateFlow
 
 object SettingsSyncScreen : SearchableSettings {
 
@@ -363,4 +362,3 @@ object SettingsSyncScreen : SearchableSettings {
         )
     }
 }
-
