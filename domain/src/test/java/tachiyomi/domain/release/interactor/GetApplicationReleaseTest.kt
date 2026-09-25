@@ -22,32 +22,6 @@ class GetApplicationReleaseTest {
     }
 
     @Test
-    fun `When has update but is preview expect new update`() = runTest {
-        val release = Release(
-            "r2000",
-            "info",
-            "http://example.com/release_link",
-            "http://example.com/release_link.apk",
-        )
-
-        coEvery { releaseService.latest(any()) } returns release
-
-        val result = getApplicationRelease.await(
-            GetApplicationRelease.Arguments(
-                isFoss = false,
-                isPreview = true,
-                commitCount = 1000,
-                versionName = "",
-                repository = "test",
-            ),
-        )
-
-        (result as GetApplicationRelease.Result.NewUpdate).release shouldBe GetApplicationRelease.Result.NewUpdate(
-            release,
-        ).release
-    }
-
-    @Test
     fun `When has update expect new update`() = runTest {
         val release = Release(
             "v2.0.0",
@@ -61,8 +35,6 @@ class GetApplicationReleaseTest {
         val result = getApplicationRelease.await(
             GetApplicationRelease.Arguments(
                 isFoss = false,
-                isPreview = false,
-                commitCount = 0,
                 versionName = "v1.0.0",
                 repository = "test",
             ),
@@ -87,8 +59,6 @@ class GetApplicationReleaseTest {
         val result = getApplicationRelease.await(
             GetApplicationRelease.Arguments(
                 isFoss = false,
-                isPreview = false,
-                commitCount = 0,
                 versionName = "v2.0.0",
                 repository = "test",
             ),
