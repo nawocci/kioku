@@ -44,6 +44,10 @@ class OnboardingScreen : Screen() {
                 SearchableSettings.highlightKey = restoreSettingKey
                 navigator.push(SettingsScreen(SettingsScreen.Destination.DataAndStorage))
             },
+            onSync = {
+                finishOnboarding()
+                navigator.push(SettingsScreen(SettingsScreen.Destination.Sync))
+            },
         )
     }
 }
