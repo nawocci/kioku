@@ -25,15 +25,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.BasePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PrefsHorizontalPadding
+import eu.kanade.tachiyomi.data.library.MetadataUpdateJob
 import eu.kanade.tachiyomi.data.sync.SyncApi
+import eu.kanade.tachiyomi.data.sync.SyncChangeSetDto
+import eu.kanade.tachiyomi.data.sync.SyncExtensionResolver
 import eu.kanade.tachiyomi.data.sync.SyncJob
 import eu.kanade.tachiyomi.data.sync.SyncManager
+import eu.kanade.tachiyomi.data.sync.SyncMerger
+import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.system.workManager
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import tachiyomi.data.Database
 import tachiyomi.domain.sync.service.SyncPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -42,6 +50,8 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 object SettingsSyncScreen : SearchableSettings {
+
+    private val missingExtensionsState = MutableStateFlow<List<Extension.Available>?>(null)
 
     @ReadOnlyComposable
     @Composable
@@ -68,6 +78,25 @@ object SettingsSyncScreen : SearchableSettings {
         val lastSyncTimestamp by syncPreferences.lastSyncTimestamp.collectAsState()
         val lastSyncError by syncPreferences.lastSyncError.collectAsState()
         val configured = serverUrl.isNotBlank() && apiKey.isNotBlank()
+
+        val missingExtensions by missingExtensionsState.collectAsState()
+        missingExtensions?.let { extensions ->
+            SyncExtensionDialog(
+                extensions = extensions,
+                onInstallAll = {
+                    val resolver = Injekt.get<SyncExtensionResolver>()
+                    missingExtensionsState.value = null
+                    resolver.installExtensions(extensions) {
+                        MetadataUpdateJob.startNow(context)
+                        SyncJob.startNow(context)
+                    }
+                },
+                onDismiss = {
+                    missingExtensionsState.value = null
+                    SyncJob.startNow(context)
+                },
+            )
+        }
 
         // Show a masked preview of the API key; never the full value.
         val maskedApiKey = if (apiKey.isBlank()) null else apiKey.take(8) + "*".repeat(8)
@@ -142,6 +171,9 @@ object SettingsSyncScreen : SearchableSettings {
                                                 context = context,
                                                 syncApi = syncApi,
                                                 syncPreferences = syncPreferences,
+                                                onShowMissing = { missing ->
+                                                    missingExtensionsState.value = missing
+                                                },
                                             )
                                             testing = false
                                         }
@@ -175,6 +207,9 @@ object SettingsSyncScreen : SearchableSettings {
                                                 context = context,
                                                 syncApi = syncApi,
                                                 syncPreferences = syncPreferences,
+                                                onShowMissing = { missing ->
+                                                    missingExtensionsState.value = missing
+                                                },
                                             )
                                         }
                                     },
@@ -206,6 +241,7 @@ object SettingsSyncScreen : SearchableSettings {
         context: Context,
         syncApi: SyncApi,
         syncPreferences: SyncPreferences,
+        onShowMissing: (List<Extension.Available>) -> Unit,
     ) {
         val ok = runCatching { syncApi.authCheck() }.getOrDefault(false)
         if (!ok) {
@@ -213,7 +249,29 @@ object SettingsSyncScreen : SearchableSettings {
             return
         }
 
-        if (syncPreferences.lastSyncRevision.get() > 0L) {
+        val watermark = syncPreferences.lastSyncRevision.get()
+        val pull = if (watermark == 0L) runCatching { syncApi.pull(0L) }.getOrNull() else null
+        if (pull != null && pull.changes.extensionStores.isNotEmpty()) {
+            val merger = SyncMerger()
+            merger.apply(SyncChangeSetDto(extensionStores = pull.changes.extensionStores))
+        }
+
+        val remoteSourceIds = pull?.changes?.mangas?.map { it.sourceId }?.toSet() ?: emptySet()
+        val localSourceIds = runCatching {
+            Injekt.get<Database>().mangasQueries.getFavorites().awaitAsList().map { it.source }.toSet()
+        }.getOrDefault(emptySet())
+
+        val allSourceIds = remoteSourceIds + localSourceIds
+        if (allSourceIds.isNotEmpty()) {
+            val resolver = Injekt.get<SyncExtensionResolver>()
+            val missing = resolver.findMissingExtensions(allSourceIds)
+            if (missing.isNotEmpty()) {
+                onShowMissing(missing)
+                return
+            }
+        }
+
+        if (watermark > 0L) {
             context.toast(MR.strings.sync_test_success)
         }
         SyncJob.startNow(context)
