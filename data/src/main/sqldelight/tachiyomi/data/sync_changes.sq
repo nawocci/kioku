@@ -1,0 +1,196 @@
+-- Sync outbox. The triggers below enqueue one row per local change; the
+-- client drains the queue, pushes it, then deletes the pushed rows.
+--
+-- entity_type: 'manga' | 'chapter' | 'category' | 'manga_category' | 'history' | 'preference' | 'extension_store'
+-- change_type: 'upsert' | 'delete'
+--
+-- Echo suppression: every trigger is additionally guarded by sync_state.applying,
+-- a single-row flag the client sets to 1 while it applies changes pulled from the
+-- server. This prevents applied foreign changes from re-entering the outbox for
+-- every entity type (categories, history, extension stores, ...), which the
+-- per-row is_syncing flag alone cannot cover.
+CREATE TABLE sync_changes(
+    _id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    manga_source INTEGER,
+    manga_url TEXT,
+    chapter_url TEXT,
+    category_name TEXT,
+    pref_key TEXT,
+    extension_store_url TEXT,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX idx_sync_changes_entity ON sync_changes(entity_type, manga_url, chapter_url);
+
+CREATE TABLE sync_state(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    applying INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO sync_state(_id, applying) VALUES (0, 0);
+
+CREATE TRIGGER sync_manga_inserted AFTER INSERT ON mangas
+WHEN new.favorite = 1 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url)
+    VALUES ('manga', 'upsert', new.source, new.url);
+END;
+
+CREATE TRIGGER sync_manga_updated AFTER UPDATE ON mangas
+WHEN new.is_syncing = 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0 AND (
+    new.url != old.url OR
+    new.description != old.description OR
+    new.favorite != old.favorite OR
+    new.title != old.title OR
+    new.notes != old.notes OR
+    new.viewer != old.viewer OR
+    new.chapter_flags != old.chapter_flags OR
+    new.update_strategy != old.update_strategy
+)
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url)
+    VALUES ('manga', 'upsert', new.source, new.url);
+END;
+
+CREATE TRIGGER sync_manga_deleted AFTER DELETE ON mangas
+WHEN COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url)
+    VALUES ('manga', 'delete', old.source, old.url);
+END;
+
+CREATE TRIGGER sync_chapter_updated AFTER UPDATE ON chapters
+WHEN new.is_syncing = 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0 AND (
+    new.read != old.read OR
+    new.bookmark != old.bookmark OR
+    new.last_page_read != old.last_page_read
+)
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'chapter', 'upsert', M.source, M.url, new.url
+    FROM mangas M
+    WHERE M._id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_manga_category_inserted AFTER INSERT ON mangas_categories
+WHEN COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'upsert', M.source, M.url, C.name
+    FROM mangas M, categories C
+    WHERE M._id = new.manga_id AND C._id = new.category_id;
+END;
+
+CREATE TRIGGER sync_manga_category_deleted AFTER DELETE ON mangas_categories
+WHEN COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'delete', M.source, M.url, C.name
+    FROM mangas M, categories C
+    WHERE M._id = old.manga_id AND C._id = old.category_id;
+END;
+
+CREATE TRIGGER sync_category_inserted AFTER INSERT ON categories
+WHEN new._id > 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    VALUES ('category', 'upsert', new.name);
+END;
+
+CREATE TRIGGER sync_category_updated AFTER UPDATE ON categories
+WHEN new._id > 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    -- A rename tombstones the old name (categories are keyed by name).
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    SELECT 'category', 'delete', old.name
+    WHERE new.name != old.name;
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    VALUES ('category', 'upsert', new.name);
+
+    -- Re-link existing mangas to the new category name on the wire
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'delete', M.source, M.url, old.name
+    FROM mangas_categories MC
+    JOIN mangas M ON M._id = MC.manga_id
+    WHERE MC.category_id = new._id AND new.name != old.name;
+
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, category_name)
+    SELECT 'manga_category', 'upsert', M.source, M.url, new.name
+    FROM mangas_categories MC
+    JOIN mangas M ON M._id = MC.manga_id
+    WHERE MC.category_id = new._id AND new.name != old.name;
+END;
+
+CREATE TRIGGER sync_category_deleted AFTER DELETE ON categories
+WHEN old._id > 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, category_name)
+    VALUES ('category', 'delete', old.name);
+END;
+
+CREATE TRIGGER sync_extension_store_inserted AFTER INSERT ON extension_store
+WHEN COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, extension_store_url)
+    VALUES ('extension_store', 'upsert', new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_updated AFTER UPDATE ON extension_store
+WHEN COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, extension_store_url)
+    VALUES ('extension_store', 'upsert', new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_deleted AFTER DELETE ON extension_store
+WHEN COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, extension_store_url)
+    VALUES ('extension_store', 'delete', old.index_url);
+END;
+
+-- History resets (last_read = 0) intentionally don't propagate: the server
+-- merges history with MAX semantics.
+CREATE TRIGGER sync_history_inserted AFTER INSERT ON history
+WHEN new.last_read > 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'history', 'upsert', M.source, M.url, C.url
+    FROM chapters C
+    JOIN mangas M ON M._id = C.manga_id
+    WHERE C._id = new.chapter_id;
+END;
+
+CREATE TRIGGER sync_history_updated AFTER UPDATE OF last_read, time_read ON history
+WHEN new.last_read > 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'history', 'upsert', M.source, M.url, C.url
+    FROM chapters C
+    JOIN mangas M ON M._id = C.manga_id
+    WHERE C._id = new.chapter_id;
+END;
+
+getBatch:
+SELECT * FROM sync_changes
+ORDER BY _id
+LIMIT :limit;
+
+deleteUpTo:
+DELETE FROM sync_changes
+WHERE _id <= :id;
+
+enqueuePreference:
+INSERT INTO sync_changes(entity_type, change_type, pref_key)
+VALUES ('preference', :changeType, :prefKey);
+
+count:
+SELECT COUNT(*) FROM sync_changes;
+
+clear:
+DELETE FROM sync_changes;
+
+setApplying:
+UPDATE sync_state SET applying = :applying WHERE _id = 0;
