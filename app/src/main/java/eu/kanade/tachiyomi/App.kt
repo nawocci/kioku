@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Looper
 import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -35,6 +36,7 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.data.sync.SyncObserver
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.PreferenceModule
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -156,6 +158,14 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         // Updates widget update
         WidgetManager(Injekt.get(), Injekt.get()).apply { init(scope) }
+
+        // Sync observer. Deferred to the next idle so it doesn't touch the DB during
+        // first composition: ExtensionManager loads extensions via runBlocking on the
+        // main thread and makes a DB call, which a DB access here would deadlock.
+        Looper.myQueue().addIdleHandler {
+            SyncObserver.start(this, scope)
+            false
+        }
 
         if (!LogcatLogger.isInstalled) {
             val minLogPriority = when {
