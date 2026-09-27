@@ -138,6 +138,8 @@ sealed class Preference {
             val preference: PreferenceData<String>,
             override val title: String,
             override val subtitle: String? = "%s",
+            val placeholder: String? = null,
+            val isSensitive: Boolean = false,
             override val enabled: Boolean = true,
             override val onValueChanged: suspend (value: String) -> Boolean = { true },
         ) : PreferenceItem<String, Boolean>() {

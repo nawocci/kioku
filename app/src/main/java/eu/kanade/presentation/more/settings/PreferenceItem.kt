@@ -160,6 +160,8 @@ internal fun PreferenceItem(
                     title = item.title,
                     subtitle = item.subtitle,
                     icon = item.icon,
+                    placeholder = item.placeholder,
+                    isSensitive = item.isSensitive,
                     value = values,
                     onConfirm = {
                         val accepted = item.onValueChanged(it)
