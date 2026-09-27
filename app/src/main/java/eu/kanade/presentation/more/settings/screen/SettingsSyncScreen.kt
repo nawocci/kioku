@@ -2,12 +2,17 @@ package eu.kanade.presentation.more.settings.screen
 
 import android.content.Context
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -56,6 +61,47 @@ object SettingsSyncScreen : SearchableSettings {
     @ReadOnlyComposable
     @Composable
     override fun getTitleRes() = MR.strings.label_sync
+
+    @Composable
+    override fun RowScope.AppBarAction() {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val syncPreferences = remember { Injekt.get<SyncPreferences>() }
+        val syncApi = remember { Injekt.get<SyncApi>() }
+        var showScanner by remember { mutableStateOf(false) }
+
+        if (showScanner) {
+            SyncQrScannerDialog(
+                onScanned = { raw ->
+                    showScanner = false
+                    val parts = raw.trim().split("|")
+                    if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                        syncPreferences.syncServerUrl.set(parts[0].trim().trimEnd('/'))
+                        syncPreferences.syncApiKey.set(parts[1].trim())
+                        scope.launch {
+                            context.toast(MR.strings.sync_qr_scanned_success)
+                            triggerConnectAndSync(
+                                context = context,
+                                syncApi = syncApi,
+                                syncPreferences = syncPreferences,
+                                onShowMissing = { missing -> missingExtensionsState.value = missing },
+                            )
+                        }
+                    } else {
+                        context.toast(MR.strings.sync_qr_invalid)
+                    }
+                },
+                onDismiss = { showScanner = false },
+            )
+        }
+
+        IconButton(onClick = { showScanner = true }) {
+            Icon(
+                imageVector = Icons.Outlined.QrCodeScanner,
+                contentDescription = stringResource(MR.strings.action_scan_qr),
+            )
+        }
+    }
 
     @Composable
     override fun getPreferences(): List<Preference> {

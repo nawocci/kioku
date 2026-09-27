@@ -249,6 +249,7 @@ dependencies {
     implementation(libs.androidx.annotation)
     implementation(libs.androidx.appCompat)
     implementation(libs.androidx.biometric)
+    implementation(libs.bundles.androidx.camera)
     implementation(libs.androidx.constraintLayout)
     implementation(libs.androidx.core)
     implementation(libs.androidx.coreSplashScreen)
@@ -318,6 +319,9 @@ dependencies {
 
     // String similarity
     implementation(libs.stringSimilarity)
+
+    // QR code decoding (no Google Play Services dependency)
+    implementation(libs.zxing.core)
 
     // Tests
     testImplementation(libs.bundles.test)

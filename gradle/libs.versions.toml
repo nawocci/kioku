@@ -8,6 +8,7 @@ androidx-appCompat = "1.7.1"
 androidx-baselineProfile = "1.5.0-beta01"
 androidx-benchmark = "1.4.1"
 androidx-biometric = "1.2.0-alpha05"
+androidx-camera = "1.6.2"
 androidx-compose-bom = "2026.07.01"
 androidx-constraintLayout = "2.2.2"
 androidx-core = "1.19.0"
@@ -73,6 +74,7 @@ tapmoc = "0.4.2"
 unifile = "08f224c8f9"
 voyager = "2.2.21-1.10.3"
 xmlutil = "1.0.1"
+zxing = "3.5.3"
 
 [libraries]
 aboutLibraries-compose = { module = "com.mikepenz:aboutlibraries-compose-m3", version.ref = "aboutLibraries" }
@@ -83,6 +85,10 @@ androidx-annotation = { module = "androidx.annotation:annotation", version.ref =
 androidx-appCompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appCompat" }
 androidx-benchmark-macroJunit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "androidx-benchmark" }
 androidx-biometric = { module = "androidx.biometric:biometric-ktx", version.ref = "androidx-biometric" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "androidx-camera" }
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "androidx-camera" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "androidx-camera" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "androidx-camera" }
 androidx-compose-animation = { module = "androidx.compose.animation:animation" }
 androidx-compose-animationGraphics = { module = "androidx.compose.animation:animation-graphics" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom-alpha", version.ref = "androidx-compose-bom" }
@@ -188,6 +194,7 @@ voyager-tabNavigator = { module = "cafe.adriel.voyager:voyager-tab-navigator", v
 voyager-transitions = { module = "cafe.adriel.voyager:voyager-transitions", version.ref = "voyager" }
 xmlutil-core = { module = "io.github.pdvrieze.xmlutil:core-android", version.ref = "xmlutil" }
 xmlutil-serialization = { module = "io.github.pdvrieze.xmlutil:serialization", version.ref = "xmlutil" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 aboutLibraries = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutLibraries" }
@@ -208,6 +215,7 @@ spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 
 [bundles]
+androidx-camera = ["androidx-camera-camera2", "androidx-camera-core", "androidx-camera-lifecycle", "androidx-camera-view"]
 androidx-lifecycle = ["androidx-lifecycle-common", "androidx-lifecycle-process", "androidx-lifecycle-runtime", "androidx-lifecycle-viewmodel", "androidx-lifecycle-viewmodelCompose"]
 coil = ["coil-core", "coil-gif", "coil-compose", "coil-network-okhttp"]
 kotlinx-coroutines = ["kotlinx-coroutines-core", "kotlinx-coroutines-android", "kotlinx-coroutines-guava"]
