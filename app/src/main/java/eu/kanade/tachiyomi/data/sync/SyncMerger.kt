@@ -259,14 +259,22 @@ class SyncMerger(
             dto.read && !dbChapter.read -> dto.lastPageRead
             else -> max(dbChapter.last_page_read, dto.lastPageRead)
         }
-        if (read == dbChapter.read && bookmark == dbChapter.bookmark && page == dbChapter.last_page_read) {
+        // Updates-page dates: earliest wins. 0 means unknown (old client) and never
+        // overwrites a known date. This lets a fresh device that bulk-fetched every
+        // chapter with dateFetch=now converge back to the original dates and thus
+        // the exact same Updates list.
+        val dateFetch = minNonZero(dbChapter.date_fetch, dto.dateFetch)
+        val dateUpload = minNonZero(dbChapter.date_upload, dto.dateUpload)
+        if (read == dbChapter.read && bookmark == dbChapter.bookmark && page == dbChapter.last_page_read &&
+            dateFetch == dbChapter.date_fetch && dateUpload == dbChapter.date_upload
+        ) {
             return true
         }
 
         database.chaptersQueries.update(
             mangaId = null, url = null, name = null, scanlator = null,
             read = read, bookmark = bookmark, lastPageRead = page,
-            chapterNumber = null, sourceOrder = null, dateFetch = null, dateUpload = null,
+            chapterNumber = null, sourceOrder = null, dateFetch = dateFetch, dateUpload = dateUpload,
             chapterId = dbChapter._id,
             version = max(dbChapter.version, dto.clientVersion),
             isSyncing = 1,
@@ -356,11 +364,7 @@ class SyncMerger(
 
         for (dto in dtos) {
             try {
-                if (dto.key in PREFERENCE_DENYLIST ||
-                    Preference.isPrivate(dto.key) ||
-                    Preference.isAppState(dto.key) ||
-                    dto.key.startsWith(SYNC_OWN_PREFIX)
-                ) {
+                if (!isSyncablePreference(dto.key)) {
                     continue
                 }
 
@@ -445,11 +449,29 @@ class SyncMerger(
         /** Private (secrets) and app-state keys never leave the device. */
         const val SYNC_OWN_PREFIX = "sync_"
 
+        /**
+         * Updates-page state that is technically app-state but must sync so a fresh
+         * device shows the same Updates badge/list: last library-update timestamp
+         * and unseen-updates count. Latest writer wins.
+         */
+        val SYNCABLE_APP_STATE_KEYS: Set<String> = setOf(
+            Preference.appStateKey("library_update_last_timestamp"),
+            Preference.appStateKey("library_unseen_updates_count"),
+        )
+
         fun isSyncablePreference(key: String): Boolean {
+            if (key in SYNCABLE_APP_STATE_KEYS) return key !in PREFERENCE_DENYLIST
             return !Preference.isPrivate(key) &&
                 !Preference.isAppState(key) &&
                 key !in PREFERENCE_DENYLIST &&
                 !key.startsWith(SYNC_OWN_PREFIX)
+        }
+
+        /** Earliest-wins merge for Updates dates; 0 means unknown and never wins. */
+        fun minNonZero(local: Long, remote: Long): Long = when {
+            local <= 0L -> remote
+            remote <= 0L -> local
+            else -> minOf(local, remote)
         }
 
         fun decodeUpdateStrategy(name: String): UpdateStrategy = try {

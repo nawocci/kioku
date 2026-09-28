@@ -33,6 +33,8 @@ data class SyncChapterDto(
     val read: Boolean = false,
     val bookmark: Boolean = false,
     @SerialName("last_page_read") val lastPageRead: Long = 0,
+    @SerialName("date_fetch") val dateFetch: Long = 0,
+    @SerialName("date_upload") val dateUpload: Long = 0,
     @SerialName("client_version") val clientVersion: Long = 0,
 )
 

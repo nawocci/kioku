@@ -65,8 +65,22 @@ CREATE TRIGGER sync_chapter_updated AFTER UPDATE ON chapters
 WHEN new.is_syncing = 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0 AND (
     new.read != old.read OR
     new.bookmark != old.bookmark OR
-    new.last_page_read != old.last_page_read
+    new.last_page_read != old.last_page_read OR
+    new.date_fetch != old.date_fetch OR
+    new.date_upload != old.date_upload
 )
+BEGIN
+    INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
+    SELECT 'chapter', 'upsert', M.source, M.url, new.url
+    FROM mangas M
+    WHERE M._id = new.manga_id;
+END;
+
+-- New chapters carry Updates-page dates (date_fetch/date_upload) that must sync
+-- even when they are otherwise in default state. The MIN merge on both ends
+-- keeps a fresh device's bulk-fetch now-dates from overwriting the originals.
+CREATE TRIGGER sync_chapter_inserted AFTER INSERT ON chapters
+WHEN new.is_syncing = 0 AND COALESCE((SELECT applying FROM sync_state WHERE _id = 0), 0) = 0
 BEGIN
     INSERT INTO sync_changes(entity_type, change_type, manga_source, manga_url, chapter_url)
     SELECT 'chapter', 'upsert', M.source, M.url, new.url

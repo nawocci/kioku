@@ -272,6 +272,8 @@ class SyncManager(
             read = dbChapter.read,
             bookmark = dbChapter.bookmark,
             lastPageRead = dbChapter.last_page_read,
+            dateFetch = dbChapter.date_fetch,
+            dateUpload = dbChapter.date_upload,
             clientVersion = dbChapter.version,
         )
     }
@@ -358,10 +360,19 @@ class SyncManager(
         val dbCategories = database.categoriesQueries.getCategories().awaitAsList()
             .filter { it.id > 0 }
 
+        // Updates-page context window: the Updates tab shows uploads from the last
+        // 3 months, so upload/fetch dates inside 2x that window are enough to
+        // reconstruct the exact list on a fresh device. Older clean chapters are
+        // omitted to keep the one-time snapshot small; dirty (read/bookmark/
+        // progress) chapters are always included regardless of age.
+        val updatesCutoff = Clock.System.now().toEpochMilliseconds() - UPDATES_SYNC_WINDOW_MS
+
         for (manga in dbMangas) {
             database.chaptersQueries.getChaptersByMangaId(manga._id, 0L).awaitAsList()
-                // Only user state matters; default-state chapters carry no information.
-                .filter { it.read || it.bookmark || it.last_page_read > 0L }
+                .filter { chapter ->
+                    chapter.read || chapter.bookmark || chapter.last_page_read > 0L ||
+                        chapter.date_fetch >= updatesCutoff || chapter.date_upload >= updatesCutoff
+                }
                 .forEach { chapter ->
                     chapters.add(
                         SyncChapterDto(
@@ -371,6 +382,8 @@ class SyncManager(
                             read = chapter.read,
                             bookmark = chapter.bookmark,
                             lastPageRead = chapter.last_page_read,
+                            dateFetch = chapter.date_fetch,
+                            dateUpload = chapter.date_upload,
                             clientVersion = chapter.version,
                         ),
                     )
@@ -443,6 +456,13 @@ class SyncManager(
         private const val QUEUE_BATCH_SIZE = 500L
         private const val MAX_DRAIN_ITERATIONS = 20
         private const val MAX_WATERMARK_RETRIES = 3
+
+        /**
+         * Updates-page context window. The Updates tab shows uploads from the last
+         * 3 months; 6 months gives a buffer for fetch delay, clock skew and offline
+         * periods while keeping the one-time snapshot small.
+         */
+        const val UPDATES_SYNC_WINDOW_MS = 180L * 24 * 60 * 60 * 1000
 
         const val ENTITY_MANGA = "manga"
         const val ENTITY_CHAPTER = "chapter"

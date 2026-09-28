@@ -57,6 +57,12 @@ class SyncPreferencePolicyTest {
     }
 
     @Test
+    fun `updates badge state is syncable despite app-state prefix`() {
+        SyncMerger.isSyncablePreference("__APP_STATE_library_update_last_timestamp") shouldBe true
+        SyncMerger.isSyncablePreference("__APP_STATE_library_unseen_updates_count") shouldBe true
+    }
+
+    @Test
     fun `denylist entries are not themselves syncable`() {
         SyncMerger.PREFERENCE_DENYLIST.forEach { key ->
             SyncMerger.isSyncablePreference(key) shouldBe false

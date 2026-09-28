@@ -134,6 +134,44 @@ class SyncDtoTest {
     }
 
     @Test
+    fun `chapter dto serializes update dates for updates page sync`() {
+        val encoded = json.encodeToString(
+            SyncChapterDto.serializer(),
+            SyncChapterDto(
+                mangaSourceId = 7,
+                mangaUrl = "/m",
+                url = "/c/1",
+                read = false,
+                dateFetch = 1_700_000_000_001,
+                dateUpload = 1_700_000_000_002,
+                clientVersion = 3,
+            ),
+        )
+
+        encoded shouldContain "\"date_fetch\":1700000000001"
+        encoded shouldContain "\"date_upload\":1700000000002"
+    }
+
+    @Test
+    fun `chapter dto without dates decodes as unknown`() {
+        // Old clients/servers omit dates; 0 means unknown and never overwrites.
+        val body = """{"manga_source_id":7,"manga_url":"/m","url":"/c/1","read":true}"""
+        val dto = json.decodeFromString(SyncChapterDto.serializer(), body)
+
+        dto.dateFetch shouldBe 0L
+        dto.dateUpload shouldBe 0L
+    }
+
+    @Test
+    fun `minNonZero keeps earliest known date`() {
+        SyncMerger.minNonZero(100L, 200L) shouldBe 100L
+        SyncMerger.minNonZero(200L, 100L) shouldBe 100L
+        SyncMerger.minNonZero(100L, 0L) shouldBe 100L
+        SyncMerger.minNonZero(0L, 100L) shouldBe 100L
+        SyncMerger.minNonZero(0L, 0L) shouldBe 0L
+    }
+
+    @Test
     fun `preference value round trips as typed json`() {
         val dto = SyncPreferenceDto(
             key = "k",
