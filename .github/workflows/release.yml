@@ -34,6 +34,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Verify tag matches versionName
+        run: |
+          set -e
+          VERSION=$(grep -m1 'versionName = ' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ "v$VERSION" != "${{ needs.get_tag.outputs.tag }}" ]; then
+            echo "Tag ${{ needs.get_tag.outputs.tag }} does not match versionName $VERSION"
+            exit 1
+          fi
+
       - name: Set up JDK
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:

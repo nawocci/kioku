@@ -24,20 +24,27 @@ class GetApplicationRelease(
         versionName: String,
         versionTag: String,
     ): Boolean {
-        // Removes prefixes like "v"
-        val newVersion = versionTag.replace("[^\\d.]".toRegex(), "")
-        val oldVersion = versionName.replace("[^\\d.]".toRegex(), "")
-
-        val newSemVer = newVersion.split(".").map { it.toInt() }
-        val oldSemVer = oldVersion.split(".").map { it.toInt() }
-
-        oldSemVer.mapIndexed { index, i ->
-            if (newSemVer[index] > i) {
-                return true
+        // Supports both 3-part upstream tags (v0.20.4) and 4-part Kioku tags
+        // (v0.20.4.1); missing parts count as 0 so the two shapes compare.
+        val newParts = versionTag.splitVersionParts()
+        val oldParts = versionName.splitVersionParts()
+        val length = maxOf(newParts.size, oldParts.size)
+        for (index in 0 until length) {
+            val new = newParts.getOrElse(index) { 0 }
+            val old = oldParts.getOrElse(index) { 0 }
+            if (new != old) {
+                return new > old
             }
         }
 
         return false
+    }
+
+    private fun String.splitVersionParts(): List<Int> {
+        // Removes prefixes like "v" and suffixes like "f"
+        return replace("[^\\d.]".toRegex(), "")
+            .split(".")
+            .map { it.toIntOrNull() ?: 0 }
     }
 
     data class Arguments(
