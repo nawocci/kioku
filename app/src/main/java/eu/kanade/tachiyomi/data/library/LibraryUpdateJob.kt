@@ -338,7 +338,10 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val update = updateMangaFromRemote(
             source = source,
             manga = manga,
-            fetchDetails = libraryPreferences.autoUpdateMetadata.get(),
+            // Always fetch details for manga whose details were never fetched (e.g. a
+            // library restored from sync), otherwise the cover/author/status stay blank
+            // until the user opens the entry and manually refreshes.
+            fetchDetails = libraryPreferences.autoUpdateMetadata.get() || !manga.initialized,
             fetchChapters = true,
             fetchWindow = fetchWindow,
         )

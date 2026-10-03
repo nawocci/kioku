@@ -67,7 +67,7 @@ class UpdateMangaFromRemote(
                     fetchChapters = fetchChapters,
                 )
             }
-            awaitUpdateFromSource(manga, update.manga, manualFetch)
+            awaitUpdateFromSource(manga, update.manga, manualFetch, fetchDetails)
             val newChapters = syncChaptersWithSource.await(
                 rawSourceChapters = update.chapters,
                 manga = manga,
@@ -88,6 +88,7 @@ class UpdateMangaFromRemote(
         localManga: Manga,
         remoteManga: SManga,
         manualFetch: Boolean,
+        fetchDetails: Boolean,
     ): Boolean {
         val remoteTitle = try {
             remoteManga.title
@@ -132,7 +133,11 @@ class UpdateMangaFromRemote(
                 thumbnailUrl = thumbnailUrl,
                 status = remoteManga.status.toLong(),
                 updateStrategy = remoteManga.update_strategy,
-                initialized = true,
+                // Only claim the details are known when they were actually fetched.
+                // A false positive here (e.g. a synced manga whose details were never
+                // pulled from the source) makes MangaViewModel skip its automatic
+                // refresh on open, leaving the cover/author/status blank.
+                initialized = if (fetchDetails) true else null,
                 memo = remoteManga.memo,
             ),
         )
