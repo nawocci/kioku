@@ -25,6 +25,7 @@ import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
+import xyz.altaf.kioku.ForkFlags
 
 @Composable
 fun MoreScreen(
@@ -131,12 +132,14 @@ fun MoreScreen(
                     onPreferenceClick = onClickSettings,
                 )
             }
-            item {
-                TextPreferenceWidget(
-                    title = stringResource(MR.strings.label_support_us),
-                    icon = MaterialSymbols.RoundedFilled.VolunteerActivism,
-                    onPreferenceClick = onClickSupport,
-                )
+            if (ForkFlags.donationUi) {
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(MR.strings.label_support_us),
+                        icon = MaterialSymbols.RoundedFilled.VolunteerActivism,
+                        onPreferenceClick = onClickSupport,
+                    )
+                }
             }
             item {
                 TextPreferenceWidget(
