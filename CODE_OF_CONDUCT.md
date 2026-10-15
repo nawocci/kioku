@@ -59,8 +59,8 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community moderators responsible for enforcement at
-the [Mihon Discord server](https://discord.gg/mihon).
+reported to the project maintainers responsible for enforcement via the
+repository's [issue tracker](https://github.com/nawocci/kioku/issues).
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community moderators are obligated to respect the privacy and security of the

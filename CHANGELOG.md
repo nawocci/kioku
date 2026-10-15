@@ -11,6 +11,8 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - `Other` - for technical stuff.
 
 ## [Unreleased]
+### Changed
+- Rebrand the app to Kioku
 
 ## [v0.21.2] - 2026-10-13
 ### Fixed
