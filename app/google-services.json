@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "82031285239",
-    "project_id": "mihonapp",
-    "storage_bucket": "mihonapp.appspot.com"
+    "project_number": "113891396037",
+    "project_id": "kioku-ae5a4",
+    "storage_bucket": "kioku-ae5a4.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:82031285239:android:336ed6dceef55c357594f2",
+        "mobilesdk_app_id": "1:113891396037:android:7d53d0035635ee8f6023ac",
         "android_client_info": {
-          "package_name": "app.mihon"
+          "package_name": "xyz.altaf.kioku"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDTvOxBQnuXADx5isKxoynPG0nlAO8bQbk"
+          "current_key": "AIzaSyB_V6njOM6jDk8uQu1OojQwASSoOh_mp48"
         }
       ],
       "services": {
@@ -26,15 +26,15 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:82031285239:android:b7440cbdd0d33c9d7594f2",
+        "mobilesdk_app_id": "1:113891396037:android:7545e6b91780eb776023ac",
         "android_client_info": {
-          "package_name": "app.mihon.debug"
+          "package_name": "xyz.altaf.kioku.dev"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDTvOxBQnuXADx5isKxoynPG0nlAO8bQbk"
+          "current_key": "AIzaSyB_V6njOM6jDk8uQu1OojQwASSoOh_mp48"
         }
       ],
       "services": {
