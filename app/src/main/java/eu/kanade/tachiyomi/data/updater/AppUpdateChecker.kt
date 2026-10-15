@@ -37,19 +37,13 @@ class AppUpdateChecker(
 }
 
 val GITHUB_REPO: String by lazy {
-    if (isNightlyBuildType) {
-        "mihonapp/mihon-preview"
-    } else {
-        "mihonapp/mihon"
-    }
+    // Kioku ships stable builds only, so both build types resolve releases from the fork.
+    "nawocci/kioku"
 }
 
 val RELEASE_TAG: String by lazy {
-    if (isNightlyBuildType) {
-        "r${BuildConfig.COMMIT_COUNT}"
-    } else {
-        "v${BuildConfig.VERSION_NAME}"
-    }
+    // Kioku ships stable builds only, so the tag is always the version name.
+    "v${BuildConfig.VERSION_NAME}"
 }
 
 val RELEASE_URL = "https://github.com/$GITHUB_REPO/releases/tag/$RELEASE_TAG"

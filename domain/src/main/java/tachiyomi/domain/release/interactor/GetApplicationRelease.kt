@@ -33,20 +33,23 @@ class GetApplicationRelease(
         // Removes prefixes like "r" or "v"
         val newVersion = versionTag.replace("[^\\d.]".toRegex(), "")
         return if (isNightly) {
-            // Nightly builds: based on releases in "mihonapp/mihon-preview" repo
-            // tagged as something like "r1234"
-            newVersion.toInt() > commitCount
+            // Nightly builds are tagged as something like "r1234"; a plain release tag would
+            // not parse as an Int, so treat an unparseable tag as "no update" instead of crashing.
+            newVersion.toIntOrNull()?.let { it > commitCount } ?: false
         } else {
-            // Release builds: based on releases in "mihonapp/mihon" repo
-            // tagged as something like "v0.1.2"
+            // Release builds are tagged as something like "v0.1.2". Compare component by
+            // component, padding the shorter version with zeroes so that a four-part Kioku
+            // version ("0.20.4.1") compares correctly against a three-part one ("0.20.4").
             val oldVersion = versionName.replace("[^\\d.]".toRegex(), "")
 
-            val newSemVer = newVersion.split(".").map { it.toInt() }
-            val oldSemVer = oldVersion.split(".").map { it.toInt() }
+            val newSemVer = newVersion.split(".").mapNotNull { it.toIntOrNull() }
+            val oldSemVer = oldVersion.split(".").mapNotNull { it.toIntOrNull() }
 
-            oldSemVer.mapIndexed { index, i ->
-                if (newSemVer[index] > i) {
-                    return true
+            for (index in 0 until maxOf(newSemVer.size, oldSemVer.size)) {
+                val new = newSemVer.getOrElse(index) { 0 }
+                val old = oldSemVer.getOrElse(index) { 0 }
+                if (new != old) {
+                    return new > old
                 }
             }
 

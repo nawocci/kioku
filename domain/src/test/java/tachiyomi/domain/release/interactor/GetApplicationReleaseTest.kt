@@ -74,6 +74,56 @@ class GetApplicationReleaseTest {
     }
 
     @Test
+    fun `When has update with four part version expect new update`() = runTest {
+        val release = Release(
+            "v0.21.2.1",
+            "info",
+            "http://example.com/release_link",
+            "http://example.com/release_link.apk",
+        )
+
+        coEvery { releaseService.latest(any()) } returns release
+
+        val result = getApplicationRelease.await(
+            GetApplicationRelease.Arguments(
+                isFoss = false,
+                isNightly = false,
+                commitCount = 0,
+                versionName = "0.21.2",
+                repository = "test",
+            ),
+        )
+
+        (result as GetApplicationRelease.Result.NewUpdate).release shouldBe GetApplicationRelease.Result.NewUpdate(
+            release,
+        ).release
+    }
+
+    @Test
+    fun `When four part version is older expect no new update`() = runTest {
+        val release = Release(
+            "v0.21.1.1",
+            "info",
+            "http://example.com/release_link",
+            "http://example.com/release_link.apk",
+        )
+
+        coEvery { releaseService.latest(any()) } returns release
+
+        val result = getApplicationRelease.await(
+            GetApplicationRelease.Arguments(
+                isFoss = false,
+                isNightly = false,
+                commitCount = 0,
+                versionName = "0.21.2.1",
+                repository = "test",
+            ),
+        )
+
+        result shouldBe GetApplicationRelease.Result.NoNewUpdate
+    }
+
+    @Test
     fun `When has no update expect no new update`() = runTest {
         val release = Release(
             "v1.0.0",
