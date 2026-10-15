@@ -93,13 +93,6 @@ android {
 
             matchingFallbacks.addAll(commonMatchingFallbacks)
         }
-        create("nightly") {
-            initWith(release)
-
-            applicationIdSuffix = ".debug"
-
-            matchingFallbacks.addAll(commonMatchingFallbacks)
-        }
         create("benchmark") {
             initWith(release)
 
@@ -119,7 +112,6 @@ android {
     }
 
     sourceSets {
-        getByName("nightly").res.directories.add("src/debug/res")
         getByName("benchmark").res.directories.add("src/debug/res")
     }
 
