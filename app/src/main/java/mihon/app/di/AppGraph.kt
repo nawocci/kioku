@@ -33,6 +33,7 @@ import eu.kanade.tachiyomi.extension.util.ExtensionInstallActivity
 import eu.kanade.tachiyomi.network.JavaScriptEngine
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.NetworkPreferences
+import eu.kanade.tachiyomi.sync.SyncEngine
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegateImpl
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -40,6 +41,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.setting.track.BaseOAuthLoginActivity
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.CrashLogUtil
+import eu.kanade.tachiyomi.util.system.workManager
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import mihon.core.metro.IsDebugBuild
@@ -104,6 +106,7 @@ interface AppGraph : ViewModelGraph {
     val extensionStoreRepository: ExtensionStoreRepository
 
     val sourceManager: SourceManager
+    val syncEngine: SyncEngine
     val trackerManager: TrackerManager
     val extensionManager: ExtensionManager
     val chapterCache: ChapterCache
