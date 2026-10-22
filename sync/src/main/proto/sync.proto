@@ -1,0 +1,266 @@
+syntax = "proto3";
+
+package kioku.sync.v1;
+
+option java_package = "xyz.altaf.kioku.sync.proto";
+option java_multiple_files = true;
+
+// ---------------------------------------------------------------------------
+// Record keys
+//
+// Every synced record is identified by a RecordKey. The canonical encoded
+// bytes of the key message are the storage identity of the record on both
+// the server and the clients.
+
+message MangaKey {
+  int64 source_id = 1;
+  string url = 2;
+}
+
+message ChapterKey {
+  MangaKey manga = 1;
+  string url = 2;
+}
+
+// Reading history of one chapter. A distinct key from ChapterKey, so a
+// chapter's user state and its history are separate records.
+message HistoryKey {
+  MangaKey manga = 1;
+  string chapter_url = 2;
+}
+
+message CategoryKey {
+  // UUID assigned by the sync layer when a category is first pushed.
+  string id = 1;
+}
+
+message TrackKey {
+  MangaKey manga = 1;
+  int64 tracker_id = 2;
+}
+
+message SourcePrefKey {
+  string source = 1;
+  string pref = 2;
+}
+
+message RecordKey {
+  oneof kind {
+    MangaKey manga = 1;
+    ChapterKey chapter = 2;
+    CategoryKey category = 3;
+    TrackKey track = 4;
+    string preference = 5;
+    SourcePrefKey source_preference = 6;
+    string extension_store = 7;
+    int64 source_name = 8;
+    HistoryKey history = 9;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hybrid logical clock
+//
+// Orders changes across devices: wall time first, then the logical counter,
+// then the device id as a deterministic tiebreak. Encoded on every change
+// by the device that produced it.
+
+message Hlc {
+  int64 wall_ms = 1;
+  uint32 counter = 2;
+  string device = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Record states
+//
+// Each state message carries the synced fields of one record type. Manga and
+// chapter records include a metadata snapshot alongside the user state, so a
+// fresh device can present the library before its sources refresh; the source
+// remains authoritative for that metadata afterwards.
+
+message MangaState {
+  // User state
+  optional int64 favorite_at = 1; // epoch ms; absent = not in the library
+  string notes = 2;
+  int64 reader_flags = 3;
+  int64 chapter_flags = 4;
+  int32 update_strategy = 5;
+  repeated string excluded_scanlators = 6;
+  repeated string categories = 7; // CategoryKey ids
+
+  // Metadata snapshot
+  string title = 8;
+  string author = 9;
+  string artist = 10;
+  string description = 11;
+  repeated string genre = 12;
+  int32 status = 13;
+  string cover = 14;
+  bytes memo = 15;
+  bool initialized = 16;
+}
+
+message ChapterState {
+  // User state
+  bool read = 1;
+  bool bookmark = 2;
+  int32 last_page_read = 3;
+
+  // Metadata snapshot
+  string name = 4;
+  string scanlator = 5; // absent = unknown
+  double number = 6;
+  optional int64 date_upload = 7; // epoch ms; absent = unknown
+  int64 order = 8;
+  bytes memo = 9;
+}
+
+message HistoryState {
+  optional int64 read_at = 1; // epoch ms; absent = cleared
+  int64 read_duration = 2;   // ms
+}
+
+message TrackState {
+  int64 remote_id = 1;
+  string remote_url = 2;
+  optional int64 library_id = 3;
+  string title = 4;
+  double last_chapter_read = 5;
+  int64 total_chapters = 6;
+  int32 status = 7;
+  double score = 8;
+  optional int64 start_date = 9; // epoch ms; absent = unknown
+  optional int64 finish_date = 10;
+  bool private = 11;
+}
+
+message CategoryState {
+  string name = 1;
+  int64 order = 2;
+  int64 flags = 3;
+}
+
+message PrefValue {
+  message StringSet {
+    repeated string values = 1;
+  }
+  oneof value {
+    int32 int_value = 1;
+    int64 long_value = 2;
+    float float_value = 3;
+    string string_value = 4;
+    bool bool_value = 5;
+    StringSet string_set_value = 6;
+  }
+}
+
+message ExtensionStoreState {
+  string name = 1;
+  string badge_label = 2; // absent = none
+  string signing_key = 3;
+  string contact_website = 4;
+  string contact_discord = 5; // absent = none
+  bool is_legacy = 6;
+  string extension_list_url = 7; // absent = none
+}
+
+message SourceNameState {
+  string name = 1;
+  string language = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Changes
+
+message Change {
+  RecordKey key = 1;
+  Hlc modified = 2;
+  oneof state {
+    MangaState manga = 3;
+    ChapterState chapter = 4;
+    HistoryState history = 5;
+    CategoryState category = 6;
+    TrackState track = 7;
+    PrefValue preference = 8;
+    ExtensionStoreState extension_store = 9;
+    SourceNameState source_name = 10;
+  }
+  // A tombstone carries no state and deletes the record; it loses only to
+  // changes with a newer Hlc.
+  bool tombstone = 11;
+}
+
+message ChangeBatch {
+  repeated Change changes = 1;
+}
+
+message CommittedChange {
+  Change change = 1;
+  int64 seq = 2;
+}
+
+message Events {
+  repeated CommittedChange events = 1;
+}
+
+message Ack {
+  message Item {
+    RecordKey key = 1;
+    Hlc modified = 2;
+    bool applied = 3; // false = the server held a newer state
+  }
+  repeated Item items = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Session protocol
+//
+// A device opens one WebSocket to /ws with its API key in the Authorization
+// header, then speaks Frame messages: hello, optional snapshot exchange,
+// change batches in, events/acks out, ping/pong.
+
+message HelloRequest {
+  string device_id = 1;
+  string device_name = 2;
+  string app_version = 3;
+  int64 last_seq = 4; // 0 or below the retained log = snapshot required
+}
+
+message HelloResponse {
+  string library_label = 1;
+  int64 server_time_ms = 2;
+  bool snapshot_required = 3;
+  string error = 4; // non-empty = the session is rejected
+}
+
+message SnapshotRequest {}
+
+message SnapshotResponse {
+  // Current state of every record, including tombstones, so that pairing
+  // devices see server-side deletions instead of resurrecting them.
+  repeated Change records = 1;
+  int64 latest_seq = 2;
+}
+
+message Ping {
+  int64 wall_ms = 1;
+}
+
+message Pong {
+  int64 wall_ms = 1;
+}
+
+message Frame {
+  oneof body {
+    HelloRequest hello_request = 1;
+    HelloResponse hello_response = 2;
+    ChangeBatch change_batch = 3;
+    Events events = 4;
+    Ack ack = 5;
+    SnapshotRequest snapshot_request = 6;
+    SnapshotResponse snapshot_response = 7;
+    Ping ping = 8;
+    Pong pong = 9;
+  }
+}
