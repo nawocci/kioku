@@ -1,0 +1,6 @@
+<!--
+  Material Symbols Rounded 'qr_code_scanner', v399.
+  Copyright (C) Google LLC
+  SPDX-License-Identifier: Apache-2.0
+-->
+<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24"><path d="M120-680v-160q0-33 23.5-56.5T200-920h160v80H200v160h-80Zm0 400h80v160h160v80H200q-33 0-56.5-23.5T120-240v-40Zm640 0v160h-40q-33 0-56.5-23.5T640-200v-40Zm40-400v-160H640v-80h160q33 0 56.5 23.5T880-840v160h-80ZM240-240v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm160 320v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm160 320v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Z"/></svg>
