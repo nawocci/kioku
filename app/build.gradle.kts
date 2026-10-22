@@ -211,6 +211,10 @@ dependencies {
     implementation(projects.presentationCore)
     implementation(projects.presentationWidget)
     implementation(projects.telemetry)
+    implementation(projects.sync)
+    implementation(libs.protobuf.javalite)
+    implementation(libs.androidx.sqlite.bundled)
+    implementation(libs.bundles.sqldelight)
 
     // Compose
     implementation(libs.androidx.activity.compose)
@@ -224,6 +228,12 @@ dependencies {
     implementation(libs.androidx.navigationEvent)
 
     implementation(libs.androidx.interpolator)
+
+    // Sync pairing QR scanner
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.zxing.core)
 
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)

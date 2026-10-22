@@ -1,0 +1,80 @@
+import kotlin.Boolean;
+
+CREATE TABLE sync_meta(
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 0),
+    server_url TEXT,
+    api_key TEXT,
+    device_name TEXT,
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    hlc_wall INTEGER NOT NULL DEFAULT 0,
+    hlc_counter INTEGER NOT NULL DEFAULT 0,
+    sync_private INTEGER AS Boolean NOT NULL DEFAULT 0,
+    paired INTEGER AS Boolean NOT NULL DEFAULT 0
+);
+
+-- The device id is minted once, before the first pairing.
+INSERT OR IGNORE INTO sync_meta(id) VALUES (0);
+
+getMeta:
+SELECT * FROM sync_meta WHERE id = 0;
+
+getDeviceId:
+SELECT device_id FROM sync_device_id WHERE id = 0;
+
+CREATE TABLE sync_device_id(
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 0),
+    device_id TEXT NOT NULL
+);
+INSERT OR IGNORE INTO sync_device_id(id, device_id) VALUES (0, lower(hex(randomblob(16))));
+
+-- Pairing with a server forgets everything known about the previous one:
+-- its sequence position means nothing on a different library, so the next
+-- session starts from a snapshot.
+upsertServer:
+UPDATE sync_meta
+SET server_url = :serverUrl, api_key = :apiKey, last_seq = 0, paired = 0;
+
+clearServer:
+UPDATE sync_meta SET server_url = NULL, api_key = NULL, paired = 0, last_seq = 0;
+
+setDeviceName:
+UPDATE sync_meta SET device_name = :deviceName;
+
+setSyncPrivate:
+UPDATE sync_meta SET sync_private = :syncPrivate;
+
+markPaired:
+UPDATE sync_meta SET paired = 1;
+
+setLastSeq:
+UPDATE sync_meta SET last_seq = :lastSeq;
+
+setHlc:
+UPDATE sync_meta SET hlc_wall = :wall, hlc_counter = :counter;
+
+CREATE TABLE sync_records(
+    canon_key BLOB NOT NULL PRIMARY KEY,
+    wall INTEGER NOT NULL,
+    counter INTEGER NOT NULL,
+    device TEXT NOT NULL,
+    value_hash TEXT
+);
+
+upsertRecord:
+INSERT INTO sync_records(canon_key, wall, counter, device, value_hash)
+VALUES (:canonKey, :wall, :counter, :device, :valueHash)
+ON CONFLICT (canon_key) DO UPDATE SET
+    wall = excluded.wall, counter = excluded.counter, device = excluded.device,
+    value_hash = coalesce(excluded.value_hash, sync_records.value_hash);
+
+getRecord:
+SELECT * FROM sync_records WHERE canon_key = :canonKey;
+
+deleteRecord:
+DELETE FROM sync_records WHERE canon_key = :canonKey;
+
+clearRecords:
+DELETE FROM sync_records;
+
+getRecordCount:
+SELECT count(*) FROM sync_records;
