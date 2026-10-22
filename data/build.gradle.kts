@@ -45,4 +45,7 @@ dependencies {
 
     implementation(libs.androidx.sqlite.bundled)
     implementation(libs.bundles.sqldelight)
+
+    testImplementation(libs.bundles.test)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }

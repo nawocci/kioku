@@ -1,0 +1,574 @@
+CREATE TABLE sync_apply(
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 0),
+    suppress INTEGER NOT NULL DEFAULT 0
+);
+
+-- Fresh installs seed the capture flag; upgrades create it in migration 100.
+INSERT INTO sync_apply(id, suppress) VALUES (0, 0);
+
+CREATE TABLE sync_category_map(
+    category_id INTEGER NOT NULL PRIMARY KEY,
+    sync_id TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE sync_outbox(
+    record_type INTEGER NOT NULL,
+    manga_source INTEGER,
+    manga_url TEXT,
+    extra TEXT,
+    extra2 TEXT
+);
+
+CREATE UNIQUE INDEX sync_outbox_key ON sync_outbox(
+    record_type,
+    coalesce(manga_source, -1),
+    coalesce(manga_url, ''),
+    coalesce(extra, ''),
+    coalesce(extra2, '')
+);
+
+setSuppress:
+UPDATE sync_apply SET suppress = :suppress WHERE id = 0;
+
+-- The drain reads rows with their rowids and later removes exactly those
+-- rowids. A local write that lands mid-drain replaces the pending row with
+-- a fresh one (INSERT OR REPLACE in the triggers), so the ack-side removal
+-- of the old rowid cannot take the new write with it.
+getOutbox:
+SELECT rowid AS rowId, record_type, manga_source, manga_url, extra, extra2
+FROM sync_outbox
+ORDER BY rowid
+LIMIT :limit;
+
+deleteOutboxRow:
+DELETE FROM sync_outbox WHERE rowid = :rowId;
+
+clearOutbox:
+DELETE FROM sync_outbox;
+
+-- Local maintenance drops the mappings with everything else, so the server
+-- state can recreate its categories here with fresh local ids.
+clearCategoryMap:
+DELETE FROM sync_category_map;
+
+-- Rows from outside the database (preferences) and the pairing dump use
+-- this generic entry; the triggers inline their own inserts.
+enqueueOutbox:
+INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra, extra2)
+VALUES (:recordType, :mangaSource, :mangaUrl, :extra, :extra2);
+
+getSyncManga:
+SELECT
+    m.user_favorite_at,
+    m.user_notes,
+    m.user_reader_flags,
+    m.user_chapter_flags,
+    m.remote_update_strategy,
+    m.remote_title,
+    m.remote_author,
+    m.remote_artist,
+    m.remote_description,
+    m.remote_genre,
+    m.remote_status,
+    m.remote_cover,
+    m.remote_memo,
+    m.state_initialized,
+    coalesce((SELECT group_concat(scm.sync_id, char(10))
+     FROM manga_category mc
+     JOIN sync_category_map scm ON scm.category_id = mc.category_id
+     WHERE mc.manga_id = m.id), '') AS categories,
+    coalesce((SELECT group_concat(scanlator, char(10))
+     FROM excluded_scanlator
+     WHERE excluded_scanlator.manga_id = m.id), '') AS excludedScanlators
+FROM manga m
+WHERE m.source_id = :sourceId AND m.remote_url = :url;
+
+getSyncMangaExists:
+SELECT EXISTS(
+    SELECT 1
+    FROM manga m
+    WHERE m.source_id = :sourceId AND m.remote_url = :url
+    AND (
+        m.user_favorite_at IS NOT NULL
+        OR EXISTS (SELECT 1 FROM history h JOIN chapter c ON c.id = h.chapter_id WHERE c.manga_id = m.id AND h.read_at IS NOT NULL)
+        OR EXISTS (SELECT 1 FROM chapter c WHERE c.manga_id = m.id AND (c.user_read = 1 OR c.user_last_page_read != 0 OR c.user_bookmark = 1))
+        OR EXISTS (SELECT 1 FROM manga_track t WHERE t.manga_id = m.id)
+        OR m.user_notes != ''
+    )
+);
+
+-- Entries worth carrying to a fresh pairing: favorites, anything with reading
+-- state, and everything the outbox already refers to.
+getSyncMangaKeys:
+SELECT m.source_id, m.remote_url
+FROM manga m
+WHERE m.user_favorite_at IS NOT NULL
+OR EXISTS (SELECT 1 FROM history h JOIN chapter c ON c.id = h.chapter_id WHERE c.manga_id = m.id AND h.read_at IS NOT NULL)
+OR EXISTS (SELECT 1 FROM chapter c WHERE c.manga_id = m.id AND (c.user_read = 1 OR c.user_last_page_read != 0 OR c.user_bookmark = 1))
+OR EXISTS (SELECT 1 FROM manga_track t WHERE t.manga_id = m.id)
+OR m.user_notes != ''
+OR EXISTS (
+    SELECT 1 FROM sync_outbox o
+    WHERE o.record_type = 1 AND o.manga_source = m.source_id AND o.manga_url = m.remote_url
+);
+
+getSyncChapter:
+SELECT
+    c.user_read,
+    c.user_bookmark,
+    c.user_last_page_read,
+    c.remote_name,
+    c.remote_scanlator,
+    c.remote_chapter_number,
+    c.remote_date_upload,
+    c.remote_order,
+    c.remote_memo,
+    m.source_id AS mangaSource,
+    m.remote_url AS mangaUrl,
+    c.remote_url AS url
+FROM chapter c
+JOIN manga m ON m.id = c.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :url;
+
+getSyncChapterExists:
+SELECT EXISTS(
+    SELECT 1
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :url
+);
+
+getSyncChapterKeysForManga:
+SELECT c.remote_url
+FROM chapter c
+JOIN manga m ON m.id = c.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl;
+
+getSyncHistory:
+SELECT
+    h.read_at,
+    h.read_duration,
+    m.source_id AS mangaSource,
+    m.remote_url AS mangaUrl,
+    c.remote_url AS chapterUrl
+FROM history h
+JOIN chapter c ON c.id = h.chapter_id
+JOIN manga m ON m.id = c.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :chapterUrl;
+
+getSyncHistoryKeysForManga:
+SELECT c.remote_url
+FROM history h
+JOIN chapter c ON c.id = h.chapter_id
+JOIN manga m ON m.id = c.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl;
+
+getSyncTrack:
+SELECT
+    t.id,
+    t.tracker_id,
+    t.remote_id,
+    t.remote_url,
+    t.library_id,
+    t.title,
+    t.last_chapter_read,
+    t.total_chapters,
+    t.status,
+    t.score,
+    t.start_date,
+    t.finish_date,
+    t.private,
+    m.source_id AS mangaSource,
+    m.remote_url AS mangaUrl
+FROM manga_track t
+JOIN manga m ON m.id = t.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND t.tracker_id = :trackerId;
+
+getSyncTrackExists:
+SELECT EXISTS(
+    SELECT 1
+    FROM manga_track t
+    JOIN manga m ON m.id = t.manga_id
+    WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND t.tracker_id = :trackerId
+);
+
+getSyncTrackKeysForManga:
+SELECT t.tracker_id
+FROM manga_track t
+JOIN manga m ON m.id = t.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl;
+
+getSyncCategory:
+SELECT c.name, c.`order`, c.flags, scm.sync_id
+FROM category c
+JOIN sync_category_map scm ON scm.category_id = c.id
+WHERE scm.sync_id = :syncId;
+
+getSyncCategoryExists:
+SELECT EXISTS(
+    SELECT 1 FROM sync_category_map scm JOIN category c ON c.id = scm.category_id
+    WHERE scm.sync_id = :syncId
+);
+
+getSyncCategoryIds:
+SELECT sync_id FROM sync_category_map;
+
+getSyncSourceName:
+SELECT name, language FROM source WHERE id = :id;
+
+getSyncExtensionStore:
+SELECT index_url, name, badge_label, signing_key, contact_website, contact_discord, is_legacy, extension_list_url
+FROM extension_store
+WHERE index_url = :indexUrl;
+
+getSyncExtensionStoreExists:
+SELECT EXISTS(SELECT 1 FROM extension_store WHERE index_url = :indexUrl);
+
+-- Local category id for a sync id, used when applying membership.
+getSyncCategoryId:
+SELECT category_id FROM sync_category_map WHERE sync_id = :syncId;
+
+-- Registers a sync id for a local category, minting the category when it has
+-- no local counterpart yet.
+upsertSyncCategoryMap:
+INSERT OR IGNORE INTO sync_category_map(category_id, sync_id)
+VALUES (:categoryId, :syncId);
+
+insertSyncCategory:
+INSERT INTO category(name, `order`, flags)
+VALUES (:name, :order, :flags);
+
+lastInsertRowId:
+SELECT last_insert_rowid();
+
+-- Applying remote changes.
+
+getMangaRow:
+SELECT * FROM manga WHERE source_id = :sourceId AND remote_url = :url;
+
+getMangaIdByKey:
+SELECT id FROM manga WHERE source_id = :sourceId AND remote_url = :url;
+
+getChapterIdByKey:
+SELECT c.id
+FROM chapter c
+JOIN manga m ON m.id = c.manga_id
+WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :url;
+
+updateSyncChapter:
+UPDATE chapter
+SET user_read = :read,
+    user_bookmark = :bookmark,
+    user_last_page_read = :lastPageRead,
+    remote_name = :name,
+    remote_scanlator = :scanlator,
+    remote_chapter_number = :number,
+    remote_date_upload = :dateUpload,
+    remote_order = :order,
+    remote_memo = :memo
+WHERE id = :id;
+
+updateSyncCategory:
+UPDATE category
+SET name = :name, `order` = :order, flags = :flags
+WHERE id = :id;
+
+deleteSyncCategory:
+DELETE FROM category
+WHERE id = (SELECT category_id FROM sync_category_map WHERE sync_id = :syncId);
+
+deleteSyncCategoryMap:
+DELETE FROM sync_category_map WHERE sync_id = :syncId;
+
+deleteSyncManga:
+DELETE FROM manga WHERE source_id = :sourceId AND remote_url = :url;
+
+deleteSyncChapter:
+DELETE FROM chapter WHERE id = :id;
+
+deleteSyncHistory:
+DELETE FROM history WHERE chapter_id = :chapterId;
+
+deleteSyncTrack:
+DELETE FROM manga_track WHERE manga_id = :mangaId AND tracker_id = :trackerId;
+
+deleteSyncExtensionStore:
+DELETE FROM extension_store WHERE index_url = :indexUrl;
+
+deleteSyncSource:
+DELETE FROM source WHERE id = :id;
+
+unfavoriteManga:
+UPDATE manga SET user_favorite_at = NULL WHERE source_id = :sourceId AND remote_url = :url;
+
+-- Suppress expression shared by every trigger below. A missing flag row
+-- reads as suppressed, so capture only runs when the table is set up.
+--
+-- manga: user state, metadata snapshot, and category membership.
+CREATE TRIGGER sync_manga_insert AFTER INSERT ON manga
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    VALUES (1, new.source_id, new.remote_url);
+END;
+
+CREATE TRIGGER sync_manga_update AFTER UPDATE ON manga
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.user_favorite_at IS NOT new.user_favorite_at
+    OR old.user_notes IS NOT new.user_notes
+    OR old.user_reader_flags IS NOT new.user_reader_flags
+    OR old.user_chapter_flags IS NOT new.user_chapter_flags
+    OR old.remote_update_strategy IS NOT new.remote_update_strategy
+    OR old.remote_title IS NOT new.remote_title
+    OR old.remote_author IS NOT new.remote_author
+    OR old.remote_artist IS NOT new.remote_artist
+    OR old.remote_description IS NOT new.remote_description
+    OR old.remote_genre IS NOT new.remote_genre
+    OR old.remote_status IS NOT new.remote_status
+    OR old.remote_cover IS NOT new.remote_cover
+    OR old.remote_memo IS NOT new.remote_memo
+    OR old.state_initialized IS NOT new.state_initialized
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    VALUES (1, new.source_id, new.remote_url);
+END;
+
+-- Chapter and history rows follow their manga in cascade deletes; their
+-- triggers find no manga row to key a pending record by, so the manga's
+-- own pending row is all that is left: the resolver turns it into a
+-- tombstone, and applying it cascades the deletion on every device.
+CREATE TRIGGER sync_manga_delete AFTER DELETE ON manga
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    VALUES (1, old.source_id, old.remote_url);
+END;
+
+CREATE TRIGGER sync_chapter_insert AFTER INSERT ON chapter
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 2, m.source_id, m.remote_url, new.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+-- state_date_fetch changes on every refresh of every chapter, so it is not a
+-- signal; everything else the record carries is.
+CREATE TRIGGER sync_chapter_update AFTER UPDATE ON chapter
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.user_read IS NOT new.user_read
+    OR old.user_bookmark IS NOT new.user_bookmark
+    OR old.user_last_page_read IS NOT new.user_last_page_read
+    OR old.remote_name IS NOT new.remote_name
+    OR old.remote_scanlator IS NOT new.remote_scanlator
+    OR old.remote_chapter_number IS NOT new.remote_chapter_number
+    OR old.remote_date_upload IS NOT new.remote_date_upload
+    OR old.remote_order IS NOT new.remote_order
+    OR old.remote_memo IS NOT new.remote_memo
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 2, m.source_id, m.remote_url, new.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_chapter_delete AFTER DELETE ON chapter
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 2, m.source_id, m.remote_url, old.remote_url
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_history_insert AFTER INSERT ON history
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 3, m.source_id, m.remote_url, c.remote_url
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE c.id = new.chapter_id;
+END;
+
+CREATE TRIGGER sync_history_update AFTER UPDATE ON history
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.read_at IS NOT new.read_at
+    OR old.read_duration IS NOT new.read_duration
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 3, m.source_id, m.remote_url, c.remote_url
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE c.id = new.chapter_id;
+END;
+
+CREATE TRIGGER sync_history_delete AFTER DELETE ON history
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 3, m.source_id, m.remote_url, c.remote_url
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE c.id = old.chapter_id;
+END;
+
+-- Categories: the sync id is minted on insert and retires on delete, where
+-- the tombstone is keyed by the id being removed.
+CREATE TRIGGER sync_category_insert AFTER INSERT ON category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND new.id > 0
+BEGIN
+    INSERT OR IGNORE INTO sync_category_map(category_id, sync_id)
+    VALUES (new.id, lower(hex(randomblob(16))));
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    SELECT 4, sync_id FROM sync_category_map WHERE category_id = new.id;
+END;
+
+CREATE TRIGGER sync_category_update AFTER UPDATE ON category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND new.id > 0
+AND (
+    old.name IS NOT new.name
+    OR old.`order` IS NOT new.`order`
+    OR old.flags IS NOT new.flags
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    SELECT 4, sync_id FROM sync_category_map WHERE category_id = new.id;
+END;
+
+CREATE TRIGGER sync_category_delete AFTER DELETE ON category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND old.id > 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    SELECT 4, sync_id FROM sync_category_map WHERE category_id = old.id;
+    DELETE FROM sync_category_map WHERE category_id = old.id;
+END;
+
+CREATE TRIGGER sync_manga_category_insert AFTER INSERT ON manga_category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_manga_category_delete AFTER DELETE ON manga_category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_track_insert AFTER INSERT ON manga_track
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 5, m.source_id, m.remote_url, new.tracker_id
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_track_update AFTER UPDATE ON manga_track
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.remote_id IS NOT new.remote_id
+    OR old.remote_url IS NOT new.remote_url
+    OR old.library_id IS NOT new.library_id
+    OR old.title IS NOT new.title
+    OR old.last_chapter_read IS NOT new.last_chapter_read
+    OR old.total_chapters IS NOT new.total_chapters
+    OR old.status IS NOT new.status
+    OR old.score IS NOT new.score
+    OR old.start_date IS NOT new.start_date
+    OR old.finish_date IS NOT new.finish_date
+    OR old.private IS NOT new.private
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 5, m.source_id, m.remote_url, new.tracker_id
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_track_delete AFTER DELETE ON manga_track
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 5, m.source_id, m.remote_url, old.tracker_id
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_excluded_scanlator_insert AFTER INSERT ON excluded_scanlator
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_excluded_scanlator_delete AFTER DELETE ON excluded_scanlator
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_source_insert AFTER INSERT ON source
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (9, new.id);
+END;
+
+CREATE TRIGGER sync_source_update AFTER UPDATE ON source
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (old.name IS NOT new.name OR old.language IS NOT new.language)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (9, new.id);
+END;
+
+CREATE TRIGGER sync_source_delete AFTER DELETE ON source
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (9, old.id);
+END;
+
+CREATE TRIGGER sync_extension_store_insert AFTER INSERT ON extension_store
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (8, new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_update AFTER UPDATE ON extension_store
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (8, new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_delete AFTER DELETE ON extension_store
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (8, old.index_url);
+END;

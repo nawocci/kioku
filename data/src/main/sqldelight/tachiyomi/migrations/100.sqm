@@ -1,0 +1,321 @@
+-- Kioku sync: capture tables and triggers.
+--
+-- Writes to the user-facing tables leave a row in `sync_outbox`, keyed by the
+-- record they changed; the sync engine drains the outbox, resolves each row's
+-- current state, and pushes it. Rows are inserted OR REPLACE, so a burst of
+-- writes to one record coalesces into one pending row; a write landing
+-- while the drain is pushing replaces the pending row with a fresh one,
+-- which the ack-side cleanup of the old row cannot touch.
+--
+-- Remote applies and local maintenance (database restore/clear) run with
+-- `sync_apply.suppress = 1`, which silences every trigger below: changes that
+-- arrive from the server are never echoed back, and a local database clear
+-- stays local instead of deleting the library everywhere.
+
+-- Column that gates the triggers; the row exists from here on.
+CREATE TABLE sync_apply(
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 0),
+    suppress INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO sync_apply(id, suppress) VALUES (0, 0);
+
+-- Local category id to the sync-assigned id, so renames and reorders follow
+-- the same record across devices while the per-device ids stay free to differ.
+CREATE TABLE sync_category_map(
+    category_id INTEGER NOT NULL PRIMARY KEY,
+    sync_id TEXT NOT NULL UNIQUE
+);
+INSERT INTO sync_category_map(category_id, sync_id)
+SELECT id, lower(hex(randomblob(16)))
+FROM category
+WHERE id > 0;
+
+-- Pending records: record_type (see the sync protocol), and the key parts:
+-- manga_source/manga_url identify a manga (and its chapters, history and
+-- tracks with `extra`), while records with no manga key use extra/extra2.
+CREATE TABLE sync_outbox(
+    record_type INTEGER NOT NULL,
+    manga_source INTEGER,
+    manga_url TEXT,
+    extra TEXT,
+    extra2 TEXT
+);
+CREATE UNIQUE INDEX sync_outbox_key ON sync_outbox(
+    record_type,
+    coalesce(manga_source, -1),
+    coalesce(manga_url, ''),
+    coalesce(extra, ''),
+    coalesce(extra2, '')
+);
+
+-- Suppress expression shared by every trigger below. A missing flag row
+-- reads as suppressed, so capture only runs when the table is set up.
+--
+-- manga: user state, metadata snapshot, and category membership.
+CREATE TRIGGER sync_manga_insert AFTER INSERT ON manga
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    VALUES (1, new.source_id, new.remote_url);
+END;
+
+CREATE TRIGGER sync_manga_update AFTER UPDATE ON manga
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.user_favorite_at IS NOT new.user_favorite_at
+    OR old.user_notes IS NOT new.user_notes
+    OR old.user_reader_flags IS NOT new.user_reader_flags
+    OR old.user_chapter_flags IS NOT new.user_chapter_flags
+    OR old.remote_update_strategy IS NOT new.remote_update_strategy
+    OR old.remote_title IS NOT new.remote_title
+    OR old.remote_author IS NOT new.remote_author
+    OR old.remote_artist IS NOT new.remote_artist
+    OR old.remote_description IS NOT new.remote_description
+    OR old.remote_genre IS NOT new.remote_genre
+    OR old.remote_status IS NOT new.remote_status
+    OR old.remote_cover IS NOT new.remote_cover
+    OR old.remote_memo IS NOT new.remote_memo
+    OR old.state_initialized IS NOT new.state_initialized
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    VALUES (1, new.source_id, new.remote_url);
+END;
+
+-- Chapter and history rows follow their manga in cascade deletes; their
+-- triggers find no manga row to key a pending record by, so the manga's
+-- own pending row is all that is left: the resolver turns it into a
+-- tombstone, and applying it cascades the deletion on every device.
+CREATE TRIGGER sync_manga_delete AFTER DELETE ON manga
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    VALUES (1, old.source_id, old.remote_url);
+END;
+
+CREATE TRIGGER sync_chapter_insert AFTER INSERT ON chapter
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 2, m.source_id, m.remote_url, new.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+-- state_date_fetch changes on every refresh of every chapter, so it is not a
+-- signal; everything else the record carries is.
+CREATE TRIGGER sync_chapter_update AFTER UPDATE ON chapter
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.user_read IS NOT new.user_read
+    OR old.user_bookmark IS NOT new.user_bookmark
+    OR old.user_last_page_read IS NOT new.user_last_page_read
+    OR old.remote_name IS NOT new.remote_name
+    OR old.remote_scanlator IS NOT new.remote_scanlator
+    OR old.remote_chapter_number IS NOT new.remote_chapter_number
+    OR old.remote_date_upload IS NOT new.remote_date_upload
+    OR old.remote_order IS NOT new.remote_order
+    OR old.remote_memo IS NOT new.remote_memo
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 2, m.source_id, m.remote_url, new.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_chapter_delete AFTER DELETE ON chapter
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 2, m.source_id, m.remote_url, old.remote_url
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_history_insert AFTER INSERT ON history
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 3, m.source_id, m.remote_url, c.remote_url
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE c.id = new.chapter_id;
+END;
+
+CREATE TRIGGER sync_history_update AFTER UPDATE ON history
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.read_at IS NOT new.read_at
+    OR old.read_duration IS NOT new.read_duration
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 3, m.source_id, m.remote_url, c.remote_url
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE c.id = new.chapter_id;
+END;
+
+CREATE TRIGGER sync_history_delete AFTER DELETE ON history
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 3, m.source_id, m.remote_url, c.remote_url
+    FROM chapter c
+    JOIN manga m ON m.id = c.manga_id
+    WHERE c.id = old.chapter_id;
+END;
+
+-- Categories: the sync id is minted on insert and retires on delete, where
+-- the tombstone is keyed by the id being removed.
+CREATE TRIGGER sync_category_insert AFTER INSERT ON category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND new.id > 0
+BEGIN
+    INSERT OR IGNORE INTO sync_category_map(category_id, sync_id)
+    VALUES (new.id, lower(hex(randomblob(16))));
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    SELECT 4, sync_id FROM sync_category_map WHERE category_id = new.id;
+END;
+
+CREATE TRIGGER sync_category_update AFTER UPDATE ON category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND new.id > 0
+AND (
+    old.name IS NOT new.name
+    OR old.`order` IS NOT new.`order`
+    OR old.flags IS NOT new.flags
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    SELECT 4, sync_id FROM sync_category_map WHERE category_id = new.id;
+END;
+
+CREATE TRIGGER sync_category_delete AFTER DELETE ON category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND old.id > 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    SELECT 4, sync_id FROM sync_category_map WHERE category_id = old.id;
+    DELETE FROM sync_category_map WHERE category_id = old.id;
+END;
+
+CREATE TRIGGER sync_manga_category_insert AFTER INSERT ON manga_category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_manga_category_delete AFTER DELETE ON manga_category
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_track_insert AFTER INSERT ON manga_track
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 5, m.source_id, m.remote_url, new.tracker_id
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_track_update AFTER UPDATE ON manga_track
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (
+    old.remote_id IS NOT new.remote_id
+    OR old.remote_url IS NOT new.remote_url
+    OR old.library_id IS NOT new.library_id
+    OR old.title IS NOT new.title
+    OR old.last_chapter_read IS NOT new.last_chapter_read
+    OR old.total_chapters IS NOT new.total_chapters
+    OR old.status IS NOT new.status
+    OR old.score IS NOT new.score
+    OR old.start_date IS NOT new.start_date
+    OR old.finish_date IS NOT new.finish_date
+    OR old.private IS NOT new.private
+)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 5, m.source_id, m.remote_url, new.tracker_id
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_track_delete AFTER DELETE ON manga_track
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
+    SELECT 5, m.source_id, m.remote_url, old.tracker_id
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_excluded_scanlator_insert AFTER INSERT ON excluded_scanlator
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = new.manga_id;
+END;
+
+CREATE TRIGGER sync_excluded_scanlator_delete AFTER DELETE ON excluded_scanlator
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url)
+    SELECT 1, m.source_id, m.remote_url
+    FROM manga m
+    WHERE m.id = old.manga_id;
+END;
+
+CREATE TRIGGER sync_source_insert AFTER INSERT ON source
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (9, new.id);
+END;
+
+CREATE TRIGGER sync_source_update AFTER UPDATE ON source
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+AND (old.name IS NOT new.name OR old.language IS NOT new.language)
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (9, new.id);
+END;
+
+CREATE TRIGGER sync_source_delete AFTER DELETE ON source
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (9, old.id);
+END;
+
+CREATE TRIGGER sync_extension_store_insert AFTER INSERT ON extension_store
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (8, new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_update AFTER UPDATE ON extension_store
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (8, new.index_url);
+END;
+
+CREATE TRIGGER sync_extension_store_delete AFTER DELETE ON extension_store
+WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
+BEGIN
+    INSERT OR REPLACE INTO sync_outbox(record_type, extra)
+    VALUES (8, old.index_url);
+END;
