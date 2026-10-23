@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * The capture triggers exist twice: once in the fresh-install schema
- * (`sync.sq`) and once in migration 100 (`100.sqm`) for upgrades. The two
+ * (`sync.sq`) and once in migration 20 (`20.sqm`) for upgrades. The two
  * copies drifted once already — the capture flag was seeded in one and not
  * the other, silently disabling capture on fresh installs. This test keeps
  * the duplication honest by comparing every CREATE statement from both
@@ -45,7 +45,7 @@ class SyncSchemaDriftTest {
     @Test
     fun `the migration creates exactly what the fresh schema creates`() {
         val fresh = createStatements("src/main/sqldelight/tachiyomi/data/sync.sq")
-        val migrated = createStatements("src/main/sqldelight/tachiyomi/migrations/100.sqm")
+        val migrated = createStatements("src/main/sqldelight/tachiyomi/migrations/20.sqm")
 
         // The fresh schema also carries the query catalog; only the DDL is
         // duplicated, and only that must agree.
