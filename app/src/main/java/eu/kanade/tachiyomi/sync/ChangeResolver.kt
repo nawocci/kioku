@@ -11,8 +11,8 @@ import mihon.core.common.extensions.toByteArray
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.data.Database
 import xyz.altaf.kioku.sync.RecordKeys
-import xyz.altaf.kioku.sync.db.SyncDatabase
 import xyz.altaf.kioku.sync.RecordTypes
+import xyz.altaf.kioku.sync.db.SyncDatabase
 import xyz.altaf.kioku.sync.proto.CategoryState
 import xyz.altaf.kioku.sync.proto.Change
 import xyz.altaf.kioku.sync.proto.ChapterState

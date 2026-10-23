@@ -42,11 +42,11 @@ import xyz.altaf.kioku.sync.proto.RecordKey
 import xyz.altaf.kioku.sync.proto.SnapshotResponse
 import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
-import kotlin.time.Clock as WallClock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
+import kotlin.time.Clock as WallClock
 
 /**
  * Drives sync sessions: connects, pairs, drains the outbox, and applies
@@ -77,6 +77,7 @@ class SyncEngine(
     /** Wakes a live session's idle wait when the outbox gains rows. */
     private val outboxSignal = Channel<Unit>(Channel.CONFLATED)
     private var outboxWatcher: Job? = null
+
     /** One session at a time per device; see the class comment. */
     private val sessionMutex = Mutex()
 

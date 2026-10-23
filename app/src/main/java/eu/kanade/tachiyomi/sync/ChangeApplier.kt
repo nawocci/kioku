@@ -8,26 +8,26 @@ import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import dev.zacsweers.metro.Inject
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import kotlinx.serialization.json.JsonObject
+import logcat.LogPriority
 import mihon.core.common.extensions.toJsonObject
 import tachiyomi.data.Database
 import tachiyomi.domain.manga.model.Manga
 import xyz.altaf.kioku.sync.proto.CategoryState
 import xyz.altaf.kioku.sync.proto.Change
-import xyz.altaf.kioku.sync.proto.MangaKey
-import xyz.altaf.kioku.sync.proto.MangaState
-import xyz.altaf.kioku.sync.proto.PrefValue
-import xyz.altaf.kioku.sync.proto.RecordKey
-import xyz.altaf.kioku.sync.proto.SourcePrefKey
-import xyz.altaf.kioku.sync.proto.TrackKey
 import xyz.altaf.kioku.sync.proto.ChapterKey
 import xyz.altaf.kioku.sync.proto.ChapterState
 import xyz.altaf.kioku.sync.proto.ExtensionStoreState
 import xyz.altaf.kioku.sync.proto.HistoryState
+import xyz.altaf.kioku.sync.proto.MangaKey
+import xyz.altaf.kioku.sync.proto.MangaState
+import xyz.altaf.kioku.sync.proto.PrefValue
+import xyz.altaf.kioku.sync.proto.RecordKey
 import xyz.altaf.kioku.sync.proto.SourceNameState
+import xyz.altaf.kioku.sync.proto.SourcePrefKey
+import xyz.altaf.kioku.sync.proto.TrackKey
 import xyz.altaf.kioku.sync.proto.TrackState
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Instant
-import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat as logcatFn
 
 /**

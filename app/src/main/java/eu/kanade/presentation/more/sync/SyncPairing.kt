@@ -2,9 +2,9 @@ package eu.kanade.presentation.more.sync
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -24,27 +24,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.size
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import eu.kanade.tachiyomi.sync.SyncStatus
 import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.rounded.QrCodeScanner
 import mihon.icons.materialsymbols.roundedfilled.Visibility
 import mihon.icons.materialsymbols.roundedfilled.VisibilityOff
-import eu.kanade.tachiyomi.sync.SyncStatus
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import kotlin.time.Clock
 import kotlin.time.Instant
 
-/**
- * Shared pieces of the sync UI, used by both the Settings screen and the
- * onboarding step so the two flows pair, confirm, and report status the same
- * way.
- */
+// Shared pieces of the sync UI, used by both the Settings screen and the
+// onboarding step so the two flows pair, confirm, and report status the same
+// way.
 
 /** A pairing session is running or waiting on a user answer. */
 fun SyncStatus.isPairingBusy(): Boolean = this is SyncStatus.Connecting ||
@@ -275,8 +272,10 @@ fun SyncPairingDialog(
 private fun isInsecureHttp(url: String): Boolean {
     if (!url.startsWith("http://")) return false
     val host = url.substringAfter("//").substringBefore(':')
-    return !(host == "localhost" || host.startsWith("127.") || host.startsWith("192.168.") ||
-        host.startsWith("10.") || host.startsWith("172."))
+    return !(
+        host == "localhost" || host.startsWith("127.") || host.startsWith("192.168.") ||
+            host.startsWith("10.") || host.startsWith("172.")
+        )
 }
 
 /** A short, coarse "how long ago" label, recomputed on recomposition. */

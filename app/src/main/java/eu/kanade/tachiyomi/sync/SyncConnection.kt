@@ -91,7 +91,9 @@ class SyncConnection(
                     if (!helloDeferred.isCompleted) {
                         val detail = when {
                             response == null -> t.message ?: t.javaClass.simpleName
-                            response.code == 400 -> "the server refused this sync protocol version; upgrade Kioku and kioku-sync to matching versions"
+                            response.code == 400 ->
+                                "the server refused this sync protocol version; " +
+                                    "upgrade Kioku and kioku-sync to matching versions"
                             response.code == 401 -> "the server rejected the API key"
                             else -> "HTTP ${response.code}"
                         }

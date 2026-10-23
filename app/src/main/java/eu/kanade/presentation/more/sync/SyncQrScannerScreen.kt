@@ -41,8 +41,8 @@ import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.Screen
-import kotlinx.coroutines.channels.Channel
 import eu.kanade.tachiyomi.sync.SyncQrPayload
+import kotlinx.coroutines.channels.Channel
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
