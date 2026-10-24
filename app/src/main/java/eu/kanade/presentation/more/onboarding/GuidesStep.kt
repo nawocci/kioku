@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -98,17 +99,23 @@ private fun SyncSetupSection() {
     // pairing keeps it open with the error instead of closing it.
     if (state.showPairingDialog) {
         val prefill = state.scanPrefill
-        SyncPairingDialog(
-            initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
-            initialApiKey = prefill?.second ?: state.apiKey.orEmpty(),
-            error = state.error,
-            busy = status.isPairingBusy(),
-            onPair = viewModel::pair,
-            onDismiss = viewModel::dismissPairingDialog,
-            onScanQr = {
-                navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
-            },
-        )
+        // Keyed on the prefill: state restoration does not validate
+        // rememberSaveable inputs against what was saved, so without this a
+        // scan would restore the fields saved before the camera opened.
+        key(prefill) {
+            SyncPairingDialog(
+                initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
+                initialApiKey = prefill?.second ?: state.apiKey.orEmpty(),
+                error = state.error,
+                busy = status.isPairingBusy(),
+                onPair = viewModel::pair,
+                onDismiss = viewModel::dismissPairingDialog,
+                onScanQr = {
+                    viewModel.dismissPairingDialog()
+                    navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
+                },
+            )
+        }
     }
 
     Text(stringResource(MR.strings.onboarding_sync_question))

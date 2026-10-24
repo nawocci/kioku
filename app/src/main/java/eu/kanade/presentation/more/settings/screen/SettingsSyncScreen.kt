@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -70,18 +71,23 @@ object SettingsSyncScreen : SearchableSettings {
         if (state.showPairingDialog) {
             // A scan prefill overrides the stored values until pairing.
             val prefill = state.scanPrefill
-            SyncPairingDialog(
-                initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
-                initialApiKey = prefill?.second ?: state.apiKey.orEmpty(),
-                error = state.error,
-                busy = status.isPairingBusy(),
-                onPair = viewModel::pair,
-                onDismiss = viewModel::dismissPairingDialog,
-                onScanQr = {
-                    viewModel.dismissPairingDialog()
-                    navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
-                },
-            )
+            // Keyed on the prefill: state restoration does not validate
+            // rememberSaveable inputs against what was saved, so without this a
+            // scan would restore the fields saved before the camera opened.
+            key(prefill) {
+                SyncPairingDialog(
+                    initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
+                    initialApiKey = prefill?.second ?: state.apiKey.orEmpty(),
+                    error = state.error,
+                    busy = status.isPairingBusy(),
+                    onPair = viewModel::pair,
+                    onDismiss = viewModel::dismissPairingDialog,
+                    onScanQr = {
+                        viewModel.dismissPairingDialog()
+                        navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
+                    },
+                )
+            }
         }
 
         if (state.showDisconnectDialog) {
