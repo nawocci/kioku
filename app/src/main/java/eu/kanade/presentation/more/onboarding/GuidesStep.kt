@@ -9,12 +9,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -97,11 +93,10 @@ private fun SyncSetupSection() {
         onResolveReview = viewModel::resolveReview,
     )
 
-    // Local to the step, so navigating away never leaves the settings screen
-    // opening with a stale pairing dialog.
-    var showPairingDialog by rememberSaveable { mutableStateOf(false) }
-
-    if (showPairingDialog) {
+    // The form's visibility lives in the view model, shared with the Settings
+    // screen: a scan that returns here reopens it prefilled, and a failed
+    // pairing keeps it open with the error instead of closing it.
+    if (state.showPairingDialog) {
         val prefill = state.scanPrefill
         SyncPairingDialog(
             initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
@@ -109,19 +104,11 @@ private fun SyncSetupSection() {
             error = state.error,
             busy = status.isPairingBusy(),
             onPair = viewModel::pair,
-            onDismiss = {
-                viewModel.dismissPairingDialog()
-                showPairingDialog = false
-            },
+            onDismiss = viewModel::dismissPairingDialog,
             onScanQr = {
-                viewModel.dismissPairingDialog()
-                showPairingDialog = false
                 navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
             },
         )
-    }
-    LaunchedEffect(state.paired) {
-        if (state.paired) showPairingDialog = false
     }
 
     Text(stringResource(MR.strings.onboarding_sync_question))
@@ -141,7 +128,7 @@ private fun SyncSetupSection() {
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = !status.isPairingBusy(),
-            onClick = { showPairingDialog = true },
+            onClick = viewModel::openPairingDialog,
         ) {
             Text(stringResource(MR.strings.onboarding_sync_action_setup))
         }

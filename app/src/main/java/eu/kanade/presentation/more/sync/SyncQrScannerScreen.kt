@@ -10,6 +10,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,11 +44,13 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.sync.SyncQrPayload
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Scans a Kioku Sync pairing QR code and hands the decoded payload back to
@@ -63,6 +66,16 @@ class SyncQrScannerScreen(
         val navigator = LocalNavigator.currentOrThrow
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
+
+        // A code the camera read but could not use is called out briefly,
+        // rather than leaving the scan looking like nothing happened.
+        var invalidScanTick by remember { mutableStateOf(0) }
+        LaunchedEffect(invalidScanTick) {
+            if (invalidScanTick != 0) {
+                delay(3.seconds)
+                invalidScanTick = 0
+            }
+        }
 
         var hasPermission by remember {
             mutableStateOf(
@@ -83,13 +96,13 @@ class SyncQrScannerScreen(
             }
         }
 
-        // One result, then the caller navigates away; the channel keeps the
+        // One result, handed over before this screen pops; the channel keeps the
         // analyzer thread from re-delivering while that happens.
         val results = remember { Channel<SyncQrPayload>(capacity = 1) }
         LaunchedEffect(Unit) {
             results.receiveAsListFirst()?.let { payload ->
-                navigator.pop()
                 onScanned(payload)
+                navigator.pop()
             }
         }
         DisposableEffect(Unit) {
@@ -114,7 +127,12 @@ class SyncQrScannerScreen(
                     QrCameraPreview(
                         lifecycleOwner = lifecycleOwner,
                         onResult = { text ->
-                            SyncQrPayload.parse(text)?.let { results.trySend(it) }
+                            val payload = SyncQrPayload.parse(text)
+                            if (payload != null) {
+                                results.trySend(payload)
+                            } else {
+                                invalidScanTick++
+                            }
                         },
                     )
                 } else {
@@ -131,6 +149,22 @@ class SyncQrScannerScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
+                }
+
+                if (invalidScanTick != 0) {
+                    Text(
+                        text = stringResource(MR.strings.sync_scan_qr_invalid),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(24.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = MaterialTheme.shapes.small,
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }
@@ -154,6 +188,7 @@ class SyncQrScannerScreen(
                 val previewView = PreviewView(ctx)
                 val executor = Executors.newSingleThreadExecutor()
 
+                val mainExecutor = ContextCompat.getMainExecutor(ctx)
                 val providerFuture = ProcessCameraProvider.getInstance(ctx)
                 providerFuture.addListener(
                     {
@@ -161,11 +196,20 @@ class SyncQrScannerScreen(
                         val preview = Preview.Builder().build().also {
                             it.setSurfaceProvider(previewView.surfaceProvider)
                         }
+                        // Frames arrive continuously: report each distinct code once, and hand
+                        // it to the main thread since the analyzer must not touch UI state.
+                        var lastDecoded: String? = null
                         val analysis = ImageAnalysis.Builder()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                         analysis.setAnalyzer(executor) { image ->
-                            decode(image, reader)?.let(onResult)
+                            val text = decode(image, reader)
+                            if (text != null && text != lastDecoded) {
+                                lastDecoded = text
+                                mainExecutor.execute { onResult(text) }
+                            } else if (text == null) {
+                                lastDecoded = null
+                            }
                             image.close()
                         }
                         try {
@@ -180,7 +224,7 @@ class SyncQrScannerScreen(
                             // No camera (or in use); the empty preview stands.
                         }
                     },
-                    ContextCompat.getMainExecutor(ctx),
+                    mainExecutor,
                 )
 
                 previewView

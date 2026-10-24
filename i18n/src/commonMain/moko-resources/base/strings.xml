@@ -1131,4 +1131,5 @@
     <string name="sync_status_idle">Not connected</string>
     <string name="sync_scan_qr_title">Scan pairing code</string>
     <string name="sync_scan_qr_permission">Camera access is needed to scan the pairing code shown on the server dashboard.</string>
+    <string name="sync_scan_qr_invalid">That QR code isn\'t a Kioku pairing code.</string>
 </resources>
