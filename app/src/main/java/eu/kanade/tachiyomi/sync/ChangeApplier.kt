@@ -18,6 +18,7 @@ import xyz.altaf.kioku.sync.proto.ChapterKey
 import xyz.altaf.kioku.sync.proto.ChapterState
 import xyz.altaf.kioku.sync.proto.ExtensionStoreState
 import xyz.altaf.kioku.sync.proto.HistoryState
+import xyz.altaf.kioku.sync.proto.Hlc
 import xyz.altaf.kioku.sync.proto.MangaKey
 import xyz.altaf.kioku.sync.proto.MangaState
 import xyz.altaf.kioku.sync.proto.PrefValue
@@ -68,7 +69,13 @@ class ChangeApplier(
     data class PairingReport(val entries: List<ReviewEntry>)
 
     /** A library entry the server holds favorited that this device does not. */
-    data class ReviewEntry(val title: String, val sourceId: Long, val url: String)
+    data class ReviewEntry(
+        val title: String,
+        val sourceId: Long,
+        val url: String,
+        /** The server's clock for the record, so a later answer can address it. */
+        val modified: Hlc,
+    )
 
     /** A category-membership write deferred until the batch has landed. */
     private data class DeferredMembership(val mangaKey: MangaKey, val syncIds: List<String>)
@@ -117,7 +124,8 @@ class ChangeApplier(
             return null
         }
         return when (change.stateCase) {
-            Change.StateCase.MANGA -> applyManga(change.key.manga, change.manga, mode, memberships)
+            Change.StateCase.MANGA ->
+                applyManga(change.key.manga, change.manga, change.modified, mode, memberships)
             Change.StateCase.CHAPTER -> {
                 applyChapter(change.key.chapter.manga, change.key.chapter, change.chapter, mode)
                 null
@@ -159,6 +167,7 @@ class ChangeApplier(
     private suspend fun applyManga(
         mangaKey: MangaKey,
         state: MangaState,
+        modified: Hlc,
         mode: Mode,
         memberships: MutableList<DeferredMembership>,
     ): ReviewEntry? {
@@ -212,7 +221,7 @@ class ChangeApplier(
         )
         memberships += DeferredMembership(mangaKey, state.categoriesList)
         return if (mode == Mode.PAIRING && state.hasFavoriteAt() && existing.user_favorite_at == null) {
-            ReviewEntry(state.title, mangaKey.sourceId, mangaKey.url)
+            ReviewEntry(state.title, mangaKey.sourceId, mangaKey.url, modified)
         } else {
             null
         }

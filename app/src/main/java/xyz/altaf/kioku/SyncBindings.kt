@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.execSQL
 import app.cash.sqldelight.db.SqlDriver
 import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteConcurrencyModel
 import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteConfiguration
@@ -32,7 +33,11 @@ object SyncBindings {
         val driver: SqlDriver = AndroidxSqliteDriver(
             connectionFactory = object : AndroidxSqliteConnectionFactory {
                 override val driver: SQLiteDriver = BundledSQLiteDriver()
-                override fun createConnection(name: String): SQLiteConnection = driver.open(name)
+                override fun createConnection(name: String): SQLiteConnection {
+                    // Same busy handling as the main database: a session writes
+                    // here while the rest of the app reads and writes.
+                    return driver.open(name).apply { execSQL("PRAGMA busy_timeout = 3000") }
+                }
             },
             databaseType = AndroidxSqliteDatabaseType.FileProvider {
                 context.getDatabasePath("kioku-sync.db").path

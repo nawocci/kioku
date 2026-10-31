@@ -36,4 +36,17 @@ sealed interface SyncStatus {
 
     /** The last session failed. */
     data class Error(val message: String) : SyncStatus
+
+    /**
+     * A pairing session is running or waiting on the user. The UI and the
+     * engine must agree on this: the UI shows and disables the pairing form,
+     * and the engine only lets a pairing in this phase be cancelled — one that
+     * already went live is the app's session and keeps running.
+     */
+    val pairingBusy: Boolean
+        get() = this is Connecting ||
+            this is ApplyingSnapshot ||
+            this is UploadingLibrary ||
+            this is MergeConfirmation ||
+            this is AwaitingReview
 }

@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.sync
 import eu.kanade.tachiyomi.network.NetworkHelper
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 import okhttp3.ConnectionPool
@@ -76,7 +77,19 @@ class SyncConnection(
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
-                    val frame = Frame.parseFrom(bytes.toByteArray())
+                    val frame = try {
+                        Frame.parseFrom(bytes.toByteArray())
+                    } catch (e: Exception) {
+                        // A frame this build cannot decode would otherwise
+                        // desync the session silently.
+                        if (!helloDeferred.isCompleted) {
+                            helloDeferred.completeExceptionally(
+                                SyncException("the server sent a frame this app cannot read"),
+                            )
+                        }
+                        close()
+                        return
+                    }
                     if (!helloDeferred.isCompleted) {
                         val response = frame.helloResponse
                         if (response != null) {
@@ -84,7 +97,16 @@ class SyncConnection(
                             return
                         }
                     }
-                    inbound.trySend(frame)
+                    // Blocking the socket reader is the backpressure: a burst of
+                    // frames (a snapshot, then 512-event pages) must not be
+                    // dropped while the applier holds the database, because a
+                    // dropped page could never be re-fetched once a later page
+                    // advanced the stored position.
+                    try {
+                        runBlocking { inbound.send(frame) }
+                    } catch (_: Exception) {
+                        // The session closed while a frame was in flight.
+                    }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {

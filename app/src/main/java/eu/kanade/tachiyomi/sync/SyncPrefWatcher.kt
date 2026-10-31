@@ -8,6 +8,7 @@ import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import mihon.core.metro.AppCoroutineScope
+import tachiyomi.core.common.preference.Preference
 import tachiyomi.data.Database
 import xyz.altaf.kioku.sync.RecordTypes
 
@@ -57,6 +58,10 @@ class SyncPrefWatcher(
         // The app store is registered with a null source, so membership is
         // checked before the lookup; a null value is not "not registered".
         if (prefs !in registered) return@OnSharedPreferenceChangeListener
+        // App state (last version seen, migration flags, …) is device-local by
+        // definition and never syncs; dropping it here keeps it out of the
+        // outbox instead of enqueueing a row the drain would only retire.
+        if (Preference.isAppState(key)) return@OnSharedPreferenceChangeListener
         val source = registered.getValue(prefs)
         scope.launch {
             if (source == null) {

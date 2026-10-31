@@ -30,7 +30,8 @@ import mihon.core.metro.AppCoroutineScope
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.Database
 import tachiyomi.domain.source.service.SourceManager
-import xyz.altaf.kioku.sync.Clock
+import xyz.altaf.kioku.sync.HlcClock
+import xyz.altaf.kioku.sync.RecordKeys
 import xyz.altaf.kioku.sync.RecordTypes
 import xyz.altaf.kioku.sync.compareClocks
 import xyz.altaf.kioku.sync.db.SyncDatabase
@@ -170,43 +171,66 @@ class SyncEngine(
 
     /**
      * Pairs with a console-minted key: the server operator creates the key
-     * with `kioku-sync key` and pastes it here. Runs on the app scope, so
-     * leaving the settings screen does not cancel it.
+     * with `kioku-sync key` and pastes it here, or the pairing QR carries it.
+     *
+     * Runs on the app scope, so leaving the settings screen does not cancel it.
+     * [onDone] reports the pairing itself — snapshot applied, dump queued,
+     * device marked paired — not the lifetime of the live session it opens
+     * afterwards, so the form stops waiting as soon as the pairing landed.
      */
     fun pairWithKey(serverUrl: String, key: String, onDone: (Result<Unit>) -> Unit) {
         pairingJob?.cancel()
         pairingJob = scope.launch {
-            val result = runCatching {
+            val opened = try {
                 val url = serverUrl.trim().trimEnd('/')
                 syncDb.syncQueries.upsertServer(url, key.trim())
                 status.value = SyncStatus.Connecting
-                sessionMutex.withLock { runSession(interactive = true) }
-                Unit
+                sessionMutex.withLock { openSession(interactive = true) }
+            } catch (e: CancellationException) {
+                // This job was cancelled (stop(), or the user closing the
+                // dialog) or a timeout inside the session fired. Only the
+                // latter is a failure the UI must see.
+                if (coroutineContext.isActive) {
+                    val message = e.message ?: "pairing timed out"
+                    status.value = SyncStatus.Error(message)
+                    onDone(Result.failure(SyncException(message)))
+                }
+                return@launch
+            } catch (e: Exception) {
+                status.value = SyncStatus.Error(e.message ?: e.javaClass.simpleName)
+                onDone(Result.failure(e))
+                return@launch
             }
-            when (val e = result.exceptionOrNull()) {
-                null -> {
-                    onDone(result)
-                    if (isPaired()) {
-                        // A live pairing session only returns when its
-                        // connection ended; the run loop takes over with its
-                        // reconnect backoff.
-                        sessionJob?.cancel()
-                        sessionJob = scope.launch { runLoop(interactive = true) }
-                    }
-                }
-                // The pairing job itself was cancelled (stop() or the user
-                // closing the dialog): nothing to report, the caller already
-                // reset the status.
-                is CancellationException -> if (coroutineContext.isActive) {
-                    // A withTimeout inside the session, not our cancellation:
-                    // a real failure the UI must see.
-                    status.value = SyncStatus.Error(e.message ?: e.javaClass.simpleName)
-                    onDone(result)
-                }
-                else -> {
-                    status.value = SyncStatus.Error(e.message ?: e.javaClass.simpleName)
-                    onDone(result)
-                }
+
+            if (opened == null) {
+                status.value = SyncStatus.Idle
+                onDone(Result.failure(SyncException("no sync server is configured")))
+                return@launch
+            }
+
+            // Pairing landed: the snapshot is applied, the dump is queued, and
+            // the device is marked paired. Report now, rather than when the
+            // live session below eventually ends.
+            onDone(Result.success(Unit))
+            logcat { "KiokuSync paired; the session is live" }
+
+            try {
+                // Keep the socket the pairing opened: it is already caught up
+                // and holds the session mutex, so no second session can start.
+                sessionMutex.withLock { liveLoop(opened, interactive = true) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                status.value = SyncStatus.Error(e.message ?: e.javaClass.simpleName)
+            } finally {
+                opened.connection.close()
+            }
+
+            if (isPaired()) {
+                // The live socket ended; the run loop takes over with its
+                // reconnect backoff.
+                sessionJob?.cancel()
+                sessionJob = scope.launch { runLoop(interactive = true) }
             }
         }
     }
@@ -218,12 +242,7 @@ class SyncEngine(
      */
     fun cancelPairing() {
         val job = pairingJob ?: return
-        val busy = status.value.let {
-            it is SyncStatus.Connecting || it is SyncStatus.ApplyingSnapshot ||
-                it is SyncStatus.UploadingLibrary || it is SyncStatus.MergeConfirmation ||
-                it is SyncStatus.AwaitingReview
-        }
-        if (!busy) return
+        if (!status.value.pairingBusy) return
         job.cancel()
         pairingJob = null
         status.value = SyncStatus.Idle
@@ -275,26 +294,33 @@ class SyncEngine(
         }
     }
 
+    /** What the sync settings screen shows about the stored pairing. */
+    data class Identity(
+        val paired: Boolean,
+        val serverUrl: String?,
+        val apiKey: String?,
+        val deviceName: String,
+        val syncPrivate: Boolean,
+    )
+
+    /** The stored pairing, read in one query. */
+    suspend fun identity(): Identity {
+        val meta = syncDb.syncQueries.getMeta().awaitAsOne()
+        return Identity(
+            paired = meta.paired,
+            serverUrl = meta.server_url,
+            apiKey = meta.api_key,
+            deviceName = meta.device_name ?: Build.MODEL,
+            syncPrivate = meta.sync_private,
+        )
+    }
+
     /** Whether a server, key, and completed pairing are in place. */
-    suspend fun isPaired(): Boolean =
-        syncDb.syncQueries.getMeta().awaitAsOne().paired
-
-    /** The configured server, for the settings screen. */
-    suspend fun serverUrl(): String? = syncDb.syncQueries.getMeta().awaitAsOne().server_url
-
-    /** The API key, shown only when the user asks to share it with another device. */
-    suspend fun apiKey(): String? = syncDb.syncQueries.getMeta().awaitAsOne().api_key
-
-    /** The device label other devices and the dashboard see. */
-    suspend fun deviceName(): String =
-        syncDb.syncQueries.getMeta().awaitAsOne().device_name ?: Build.MODEL
+    suspend fun isPaired(): Boolean = syncDb.syncQueries.getMeta().awaitAsOne().paired
 
     suspend fun setDeviceName(name: String) {
         syncDb.syncQueries.setDeviceName(name)
     }
-
-    /** Whether private settings ride along. */
-    suspend fun syncPrivate(): Boolean = syncDb.syncQueries.getMeta().awaitAsOne().sync_private
 
     suspend fun setSyncPrivate(enabled: Boolean) {
         syncDb.syncQueries.setSyncPrivate(enabled)
@@ -307,37 +333,47 @@ class SyncEngine(
 
     // ------------------------------------------------------------- session
 
-    /** Returns false when there is no server to talk to. */
-    private suspend fun runSession(interactive: Boolean): Boolean {
+    /** A session that finished hello and catch-up; its socket is live. */
+    private class LiveSession(val connection: SyncConnection, var clock: HlcClock)
+
+    /**
+     * Opens a session and brings it up to date: hello, the snapshot when the
+     * server asks for one, then the catch-up drain. Returns null when this
+     * device has no server configured (or a background session runs before
+     * pairing completed). The socket is live on return.
+     */
+    private suspend fun openSession(interactive: Boolean): LiveSession? {
         val meta = syncDb.syncQueries.getMeta().awaitAsOne()
-        val serverUrl = meta.server_url ?: return false
-        val apiKey = meta.api_key ?: return false
+        val serverUrl = meta.server_url ?: return null
+        val apiKey = meta.api_key ?: return null
         val deviceId = syncDb.syncQueries.getDeviceId().awaitAsOne()
         val deviceName = meta.device_name ?: Build.MODEL
 
         // A background session never runs before the interactive pairing
         // completed: it would apply the snapshot without the merge
         // confirmation and the review.
-        if (!interactive && !meta.paired) return true
+        if (!interactive && !meta.paired) return null
 
         status.value = SyncStatus.Connecting
         val connection = SyncConnection(network, serverUrl, apiKey)
-        val hello = try {
-            connection.open(
+        try {
+            val hello = connection.open(
                 SyncConnection.hello(deviceId, deviceName, BuildConfig.VERSION_NAME, meta.last_seq),
                 timeout = 10.seconds,
             )
-        } catch (e: Exception) {
-            connection.close()
-            throw e
-        }
 
-        logcat { "KiokuSync session opening to $serverUrl as $deviceId at seq ${meta.last_seq}" }
-        var clock = Clock(meta.hlc_wall, meta.hlc_counter, deviceId)
-        resolver.syncPrivate = meta.sync_private
-        prefWatcher.start(sourcePrefKeys())
+            logcat { "KiokuSync session opening to $serverUrl as $deviceId at seq ${meta.last_seq}" }
+            var clock = HlcClock(meta.hlc_wall, meta.hlc_counter, deviceId)
+            // A device whose clock runs far ahead of the server would win every
+            // last-write-wins comparison forever. The session reseats it
+            // against the server's own time before issuing any new value.
+            if (clock.clampTo(hello.serverTimeMs)) {
+                logcat { "KiokuSync reseated a clock that was ahead of the server" }
+                syncDb.syncQueries.setHlc(clock.wall, clock.counter)
+            }
+            resolver.syncPrivate = meta.sync_private
+            prefWatcher.start(sourcePrefKeys())
 
-        try {
             if (hello.snapshotRequired) {
                 connection.send(snapshotRequestFrame())
                 val frame = awaitSnapshot(connection)
@@ -346,20 +382,40 @@ class SyncEngine(
 
             status.value = SyncStatus.Online(WallClock.System.now())
             logcat { "KiokuSync session live" }
-            while (coroutineContext.isActive && connection.isOpen) {
-                if (drainOneBatch(connection, clock)) continue
-                if (!interactive) {
-                    // A catch-up session has nothing else to wait for once
-                    // drained; the live loop stays for pushes and events.
-                    break
-                }
-                val frame = connection.awaitFrameOr(outboxSignal)
-                if (frame != null) {
-                    clock = handleEvents(frame, clock)
-                }
-            }
-        } finally {
+            return LiveSession(connection, clock)
+        } catch (e: Exception) {
             connection.close()
+            throw e
+        }
+    }
+
+    /**
+     * Pushes local writes and applies events until the socket closes. A
+     * catch-up session returns as soon as the outbox ran empty; the live one
+     * stays for pushes and events.
+     */
+    private suspend fun liveLoop(session: LiveSession, interactive: Boolean) {
+        while (coroutineContext.isActive && session.connection.isOpen) {
+            if (drainOneBatch(session.connection, session.clock)) {
+                status.value = SyncStatus.Online(WallClock.System.now())
+                continue
+            }
+            if (!interactive) return
+            val frame = session.connection.awaitFrameOr(outboxSignal)
+            if (frame != null) {
+                session.clock = handleEvents(frame, session.clock)
+                status.value = SyncStatus.Online(WallClock.System.now())
+            }
+        }
+    }
+
+    /** One session: open, catch up, hang up. */
+    private suspend fun runSession(interactive: Boolean): Boolean {
+        val session = openSession(interactive) ?: return false
+        try {
+            liveLoop(session, interactive)
+        } finally {
+            session.connection.close()
             logcat { "KiokuSync session closed" }
         }
         return true
@@ -389,9 +445,9 @@ class SyncEngine(
     private suspend fun applySnapshot(
         snapshot: SnapshotResponse,
         paired: Boolean,
-        clock: Clock,
+        clock: HlcClock,
         interactive: Boolean,
-    ): Clock {
+    ): HlcClock {
         val mode = if (paired) ChangeApplier.Mode.LIVE else ChangeApplier.Mode.PAIRING
         status.value = SyncStatus.ApplyingSnapshot(snapshot.recordsCount)
 
@@ -414,16 +470,16 @@ class SyncEngine(
 
         if (paired) return observed
 
-        if (report.entries.isNotEmpty() && interactive) {
+        val removeEverywhere = if (report.entries.isNotEmpty() && interactive) {
             logcat { "KiokuSync pairing review for ${report.entries.size} server-only favorites" }
             val review = CompletableDeferred<Boolean>()
             pairingReview = review
             status.value = SyncStatus.AwaitingReview(report.entries)
-            val removeEverywhere = review.await()
+            val answer = review.await()
             pairingReview = null
-            if (removeEverywhere) {
-                unfavoriteEverywhere(report.entries)
-            }
+            answer
+        } else {
+            false
         }
 
         // Everything this device holds rides up as one dump, seeding an empty
@@ -432,6 +488,14 @@ class SyncEngine(
         database.syncQueries.clearOutbox()
         syncDb.syncQueries.clearRecords()
         seedDump()
+
+        // Applied after the dump: the reviewed entries are no longer favorites,
+        // so the dump does not carry them, and their unfavorites must be queued
+        // explicitly. Anything queued before the dump would be dropped with it.
+        if (removeEverywhere) {
+            unfavoriteEverywhere(report.entries)
+        }
+
         syncDb.syncQueries.markPaired()
         return observed
     }
@@ -454,87 +518,57 @@ class SyncEngine(
         database.syncQueries.getSyncMangaKeys().awaitAsList().size
 
     /**
-     * Unfavorites the reviewed entries here and enqueues their records, so
-     * the drain pushes explicit unfavorites to the server — including
-     * entries with no other user state, which the seed dump alone would not
-     * carry.
+     * Unfavorites the reviewed entries here. The capture trigger queues each
+     * record as an ordinary local change, and the record position the server
+     * reported is kept so the resolver does not mistake the entry for a
+     * browsing leftover with nothing left to sync.
      */
     private suspend fun unfavoriteEverywhere(entries: List<ChangeApplier.ReviewEntry>) {
         database.transaction {
-            database.syncQueries.setSuppress(SUPPRESS_ON)
-            try {
-                entries.forEach { entry ->
-                    database.syncQueries.unfavoriteManga(entry.sourceId, entry.url)
-                }
-            } finally {
-                database.syncQueries.setSuppress(SUPPRESS_OFF)
+            entries.forEach { entry ->
+                database.syncQueries.unfavoriteManga(entry.sourceId, entry.url)
             }
         }
         entries.forEach { entry ->
-            database.syncQueries.enqueueOutbox(
-                RecordTypes.MANGA.toLong(),
-                entry.sourceId,
-                entry.url,
-                null,
-                null,
+            syncDb.syncQueries.upsertRecord(
+                canonKey = RecordKeys.manga(entry.sourceId, entry.url).toByteArray(),
+                wall = entry.modified.wallMs,
+                counter = entry.modified.counter.toLong(),
+                device = entry.modified.device,
+                valueHash = null,
             )
         }
     }
 
     /**
-     * Enqueues every local record worth syncing, so the drain pushes the
-     * whole state after pairing.
+     * Enqueues every local record worth syncing, so the drain pushes the whole
+     * state after pairing. The database part is a handful of statements; only
+     * preferences, which live outside it, are walked entry by entry.
      */
     private suspend fun seedDump() {
-        for (key in database.syncQueries.getSyncMangaKeys().awaitAsList()) {
-            database.syncQueries.enqueueOutbox(
-                RecordTypes.MANGA.toLong(),
-                key.source_id,
-                key.remote_url,
-                null,
-                null,
-            )
-            database.syncQueries.getSyncChapterKeysForManga(key.source_id, key.remote_url).awaitAsList()
-                .forEach { url ->
-                    database.syncQueries.enqueueOutbox(
-                        RecordTypes.CHAPTER.toLong(),
-                        key.source_id,
-                        key.remote_url,
-                        url,
-                        null,
-                    )
-                }
-            database.syncQueries.getSyncHistoryKeysForManga(key.source_id, key.remote_url).awaitAsList()
-                .forEach { url ->
-                    database.syncQueries.enqueueOutbox(
-                        RecordTypes.HISTORY.toLong(),
-                        key.source_id,
-                        key.remote_url,
-                        url,
-                        null,
-                    )
-                }
-            database.syncQueries.getSyncTrackKeysForManga(key.source_id, key.remote_url).awaitAsList()
-                .forEach { trackerId ->
-                    database.syncQueries.enqueueOutbox(
-                        RecordTypes.TRACK.toLong(),
-                        key.source_id,
-                        key.remote_url,
-                        trackerId.toString(),
-                        null,
-                    )
-                }
+        database.transaction {
+            for (key in database.syncQueries.getSyncMangaKeys().awaitAsList()) {
+                database.syncQueries.enqueueOutbox(
+                    RecordTypes.MANGA.toLong(),
+                    key.source_id,
+                    key.remote_url,
+                    null,
+                    null,
+                )
+            }
+            database.syncQueries.seedDumpChapters()
+            database.syncQueries.seedDumpHistory()
+            database.syncQueries.seedDumpTracks()
+            database.syncQueries.seedDumpCategories()
+            database.syncQueries.seedDumpExtensionStores()
+            database.syncQueries.seedDumpSourceNames()
         }
 
-        database.syncQueries.getSyncCategoryIds().awaitAsList().forEach { syncId ->
-            database.syncQueries.enqueueOutbox(RecordTypes.CATEGORY.toLong(), null, null, syncId, null)
-        }
-
-        resolver.preferenceEntries().forEach { (key, _) ->
+        resolver.preferenceEntries().keys.forEach { key ->
             database.syncQueries.enqueueOutbox(RecordTypes.PREFERENCE.toLong(), null, null, key, null)
         }
         sourcePrefKeys().forEach { source ->
-            resolver.sourcePreferenceEntries(source).forEach { (pref, _) ->
+            resolver.sourcePreferenceEntries(source).keys.forEach { pref ->
                 database.syncQueries.enqueueOutbox(
                     RecordTypes.SOURCE_PREFERENCE.toLong(),
                     null,
@@ -544,25 +578,6 @@ class SyncEngine(
                 )
             }
         }
-
-        database.extension_storeQueries.getAll().awaitAsList().forEach { store ->
-            database.syncQueries.enqueueOutbox(
-                RecordTypes.EXTENSION_STORE.toLong(),
-                null,
-                null,
-                store.index_url,
-                null,
-            )
-        }
-        database.sourceQueries.findAll().awaitAsList().forEach { source ->
-            database.syncQueries.enqueueOutbox(
-                RecordTypes.SOURCE_NAME.toLong(),
-                null,
-                null,
-                source.id.toString(),
-                null,
-            )
-        }
     }
 
     // ------------------------------------------------------------- outbound
@@ -571,7 +586,7 @@ class SyncEngine(
      * Drains up to one batch of outbox rows. Returns false when the outbox
      * ran empty.
      */
-    private suspend fun drainOneBatch(connection: SyncConnection, clock: Clock): Boolean {
+    private suspend fun drainOneBatch(connection: SyncConnection, clock: HlcClock): Boolean {
         val rows = database.syncQueries.getOutbox(BATCH_SIZE.toLong()).awaitAsList()
         if (rows.isEmpty()) return false
 
@@ -631,15 +646,18 @@ class SyncEngine(
             if (!sent) throw SyncException("send failed")
             val ack = awaitAck(connection, clock)
 
-            val applied = ack.itemsList.associateBy { item ->
-                item.key.toByteArray().contentHashCode() to item.modified.toString()
+            // The server answers one item per change, in the order it received
+            // them, so the ack lines up with what was pushed by index.
+            val applied = ack.itemsList
+            if (applied.size != pushedRows.size) {
+                logcat { "KiokuSync ack carries ${applied.size} items for ${pushedRows.size} changes" }
             }
-            for ((change, row) in pushedRows) {
+            for ((index, pushed) in pushedRows.withIndex()) {
+                val (change, row) = pushed
                 // Removal by rowid: a local write that landed mid-drain
                 // re-enqueued this record as a fresh row, which survives.
                 database.syncQueries.deleteOutboxRow(row.rowId)
-                val itemKey = change.key.toByteArray().contentHashCode() to change.modified.toString()
-                val wasApplied = applied[itemKey]?.applied ?: true
+                val wasApplied = applied.getOrNull(index)?.applied ?: true
                 if (wasApplied) {
                     rememberRecord(change)
                 }
@@ -667,7 +685,7 @@ class SyncEngine(
      * Waits for the ack of a pushed batch, applying any events that arrive
      * first. Returns the observed clock.
      */
-    private suspend fun awaitAck(connection: SyncConnection, clock: Clock): Ack {
+    private suspend fun awaitAck(connection: SyncConnection, clock: HlcClock): Ack {
         var observed = clock
         while (true) {
             val frame = connection.receive() ?: throw SyncException("connection closed")
@@ -681,7 +699,7 @@ class SyncEngine(
         }
     }
 
-    private suspend fun handleEvents(frame: Frame, clock: Clock): Clock {
+    private suspend fun handleEvents(frame: Frame, clock: HlcClock): HlcClock {
         if (frame.bodyCase != Frame.BodyCase.EVENTS) return clock
         val events = frame.events
         var maxSeq = -1L
@@ -693,7 +711,9 @@ class SyncEngine(
             }
             if (committed.seq > maxSeq) maxSeq = committed.seq
         }
-        syncDb.syncQueries.setLastSeq(maxSeq)
+        // An empty batch must not rewind the position; only a real event
+        // advances it.
+        if (maxSeq >= 0) syncDb.syncQueries.setLastSeq(maxSeq)
         syncDb.syncQueries.setHlc(clock.wall, clock.counter)
         return clock
     }
@@ -705,7 +725,7 @@ class SyncEngine(
     private suspend fun applyIncoming(change: Change): Boolean {
         val local = syncDb.syncQueries.getRecord(change.key.toByteArray()).awaitAsOneOrNull()
         if (local != null) {
-            val localClock = Clock.hlc(local.wall, local.counter, local.device)
+            val localClock = HlcClock.hlc(local.wall, local.counter, local.device)
             if (compareClocks(change.modified, localClock) <= 0) return false
         }
         applier.applyBatch(listOf(change), ChangeApplier.Mode.LIVE)

@@ -45,15 +45,6 @@ class SyncSettingsViewModel(
 
     val status: StateFlow<SyncStatus> = engine.status
 
-    /**
-     * A pairing started from the form is in flight. The engine marks itself
-     * paired before it sends this device's library up, so `paired` alone does
-     * not mean the attempt landed: only a healthy status after this flag is set
-     * closes the form, and any failure reopens it with the reason.
-     */
-    @Volatile
-    private var pairingAttempt = false
-
     init {
         refresh()
         // Pairing happens outside this view model's scope; follow along as
@@ -65,29 +56,19 @@ class SyncSettingsViewModel(
 
     private fun refresh() {
         viewModelScope.launch {
-            val paired = engine.isPaired()
-            // The engine marks itself paired before it sends this device's
-            // library up, so `paired` alone does not mean the attempt landed.
-            // A failure after that point must not shut the form and hide the
-            // reason with it.
-            val completed = pairingAttempt && paired && status.value !is SyncStatus.Error
-            if (completed) pairingAttempt = false
+            val identity = engine.identity()
             _state.value = _state.value.copy(
-                paired = paired,
-                configured = engine.serverUrl() != null,
-                serverUrl = engine.serverUrl(),
-                apiKey = engine.apiKey(),
-                deviceName = engine.deviceName(),
-                syncPrivate = engine.syncPrivate(),
-                // A completed pairing closes the form; a failed one keeps it
-                // open with the error attached.
-                showPairingDialog = if (completed) false else _state.value.showPairingDialog,
+                paired = identity.paired,
+                configured = identity.serverUrl != null,
+                serverUrl = identity.serverUrl,
+                apiKey = identity.apiKey,
+                deviceName = identity.deviceName,
+                syncPrivate = identity.syncPrivate,
             )
         }
     }
 
     fun pair(serverUrl: String, key: String) {
-        pairingAttempt = true
         _state.value = _state.value.copy(error = null)
         viewModelScope.launch {
             // Pairing over an existing pairing means the server changed: go
@@ -97,16 +78,15 @@ class SyncSettingsViewModel(
             if (engine.isPaired()) engine.unpair()
             engine.pairWithKey(serverUrl, key) { result ->
                 val failure = result.exceptionOrNull()
-                pairingAttempt = false
                 _state.value = _state.value.copy(
-                    // A failure reopens the form with the reason attached: it
-                    // can arrive after the engine already marked the pairing
-                    // complete, so a form closed on `paired` alone would hide
-                    // the error. A pairing that landed is closed by refresh().
+                    // The engine reports the moment the pairing landed, so a
+                    // success closes the form and a failure keeps it open with
+                    // the reason beside the fields.
                     error = failure?.let { it.message ?: it.javaClass.simpleName },
-                    showPairingDialog = failure != null || _state.value.showPairingDialog,
+                    showPairingDialog = failure != null,
                     scanPrefill = if (failure == null) null else _state.value.scanPrefill,
                 )
+                refresh()
             }
         }
     }
@@ -148,13 +128,11 @@ class SyncSettingsViewModel(
     }
 
     fun openPairingDialog() {
-        pairingAttempt = false
         _state.value = _state.value.copy(showPairingDialog = true, error = null, scanPrefill = null)
     }
 
     /** Opens the pairing dialog with a scanned QR payload prefilled. */
     fun openPairingDialog(payload: SyncQrPayload) {
-        pairingAttempt = false
         _state.value = _state.value.copy(
             showPairingDialog = true,
             error = null,
@@ -163,7 +141,6 @@ class SyncSettingsViewModel(
     }
 
     fun dismissPairingDialog() {
-        pairingAttempt = false
         engine.cancelPairing()
         _state.value = _state.value.copy(showPairingDialog = false, error = null)
     }
