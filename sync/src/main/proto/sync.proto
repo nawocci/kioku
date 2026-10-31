@@ -1,5 +1,8 @@
 syntax = "proto3";
 
+// This file is mirrored as proto/sync/v1/sync.proto in kioku-sync; the two must
+// stay identical apart from the language option. PROTOCOL.md is the contract
+// they implement.
 package kioku.sync.v1;
 
 option java_package = "xyz.altaf.kioku.sync.proto";
