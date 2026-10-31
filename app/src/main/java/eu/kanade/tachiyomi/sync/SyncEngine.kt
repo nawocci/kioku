@@ -628,14 +628,25 @@ class SyncEngine(
         }
 
         for (row in rows) {
-            val change = resolver.resolve(
-                row.record_type,
-                row.manga_source,
-                row.manga_url,
-                row.extra,
-                row.extra2,
-                clock.tick(WallClock.System.now()),
-            )
+            val change: Change? = try {
+                resolver.resolve(
+                    row.record_type,
+                    row.manga_source,
+                    row.manga_url,
+                    row.extra,
+                    row.extra2,
+                    clock.tick(WallClock.System.now()),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // One row this build cannot resolve must not take the whole
+                // queue down with it: it is counted and skipped, and the rows
+                // behind it still sync.
+                logcat(LogPriority.ERROR, e) { "KiokuSync could not resolve an outbox row" }
+                database.syncQueries.markOutboxAttempt(row.rowId)
+                continue
+            }
             when {
                 change == null || isPreferenceEcho(change) -> {
                     // Nothing to push anymore (or an echo of a remote apply):

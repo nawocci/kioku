@@ -38,7 +38,9 @@ CREATE TABLE sync_outbox(
     manga_source INTEGER,
     manga_url TEXT,
     extra TEXT,
-    extra2 TEXT
+    extra2 TEXT,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    attempts INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX sync_outbox_key ON sync_outbox(
     record_type,

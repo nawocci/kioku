@@ -16,7 +16,9 @@ CREATE TABLE sync_outbox(
     manga_source INTEGER,
     manga_url TEXT,
     extra TEXT,
-    extra2 TEXT
+    extra2 TEXT,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    attempts INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX sync_outbox_key ON sync_outbox(
@@ -34,11 +36,18 @@ UPDATE sync_apply SET suppress = :suppress WHERE id = 0;
 -- rowids. A local write that lands mid-drain replaces the pending row with
 -- a fresh one (INSERT OR REPLACE in the triggers), so the ack-side removal
 -- of the old rowid cannot take the new write with it.
+-- A row this build keeps failing to resolve is retried a few times and then
+-- left alone: it stays in the table to be inspected, but it no longer holds up
+-- the rest of the queue.
 getOutbox:
 SELECT rowid AS rowId, record_type, manga_source, manga_url, extra, extra2
 FROM sync_outbox
+WHERE attempts < 5
 ORDER BY rowid
 LIMIT :limit;
+
+markOutboxAttempt:
+UPDATE sync_outbox SET attempts = attempts + 1 WHERE rowid = :rowId;
 
 deleteOutboxRow:
 DELETE FROM sync_outbox WHERE rowid = :rowId;
