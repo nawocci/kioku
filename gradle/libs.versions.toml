@@ -51,6 +51,7 @@ kotest-assertions = "6.2.5"
 kotlin-gradle = "2.4.21"
 kotlinx-coroutines = "1.11.0"
 kotlinx-datetime = "0.8.0"
+protobuf = "0.10.0"
 protobuf-javalite = "4.32.1"
 kotlinx-serialization = "1.11.0"
 ktlint = "1.8.0"
@@ -227,6 +228,7 @@ kotlin-samWithReceiver = { id = "org.jetbrains.kotlin.plugin.sam.with.receiver",
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin-gradle" }
 moko-resources = { id = "dev.icerock.mobile.multiplatform-resources", version.ref = "moko-resources" }
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
+protobuf = { id = "com.google.protobuf", version.ref = "protobuf" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 valkyrie = { id = "io.github.composegears.valkyrie", version.ref = "valkyrie" }

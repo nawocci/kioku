@@ -1,4 +1,4 @@
-package xyz.altaf.kioku
+package xyz.altaf.kioku.sync.db
 
 import android.content.Context
 import androidx.sqlite.SQLiteConnection
@@ -16,7 +16,6 @@ import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
-import xyz.altaf.kioku.sync.db.SyncDatabase
 
 /**
  * The sync bookkeeping database: server identity, device id, clock, and the

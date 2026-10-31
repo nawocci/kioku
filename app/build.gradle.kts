@@ -212,9 +212,6 @@ dependencies {
     implementation(projects.presentationWidget)
     implementation(projects.telemetry)
     implementation(projects.sync)
-    implementation(libs.protobuf.javalite)
-    implementation(libs.androidx.sqlite.bundled)
-    implementation(libs.bundles.sqldelight)
 
     // Compose
     implementation(libs.androidx.activity.compose)
