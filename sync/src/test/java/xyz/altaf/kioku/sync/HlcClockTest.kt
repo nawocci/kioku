@@ -67,8 +67,9 @@ class HlcClockTest {
         assertEquals(10_000_000, c.wall)
 
         // A day ahead is not.
-        assertTrue(c.clampTo(serverTimeMs = 10_000_000))
-        assertEquals(10_000_000, c.wall)
+        val aDayBehind = 10_000_000L - 86_400_000L
+        assertTrue(c.clampTo(serverTimeMs = aDayBehind))
+        assertEquals(aDayBehind, c.wall)
         assertEquals(0, c.counter)
     }
 
