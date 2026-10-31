@@ -1,7 +1,12 @@
 package xyz.altaf.kioku.sync
 
+import xyz.altaf.kioku.sync.proto.CategoryKey
+import xyz.altaf.kioku.sync.proto.ChapterKey
+import xyz.altaf.kioku.sync.proto.HistoryKey
 import xyz.altaf.kioku.sync.proto.MangaKey
 import xyz.altaf.kioku.sync.proto.RecordKey
+import xyz.altaf.kioku.sync.proto.SourcePrefKey
+import xyz.altaf.kioku.sync.proto.TrackKey
 
 /**
  * The record types, matching the values the triggers write into the outbox
@@ -25,47 +30,36 @@ object RecordTypes {
  */
 object RecordKeys {
     fun manga(sourceId: Long, url: String): RecordKey = RecordKey.newBuilder()
-        .setManga(MangaKey.newBuilder().setSourceId(sourceId).setUrl(url))
+        .setManga(mangaKey(sourceId, url))
         .build()
 
-    fun chapter(sourceId: Long, mangaUrl: String, chapterUrl: String): RecordKey {
-        val manga = MangaKey.newBuilder().setSourceId(sourceId).setUrl(mangaUrl).build()
-        return RecordKey.newBuilder()
-            .setChapter(
-                xyz.altaf.kioku.sync.proto.ChapterKey.newBuilder()
-                    .setManga(manga)
-                    .setUrl(chapterUrl),
-            )
-            .build()
-    }
-
-    fun history(sourceId: Long, mangaUrl: String, chapterUrl: String): RecordKey {
-        val manga = MangaKey.newBuilder().setSourceId(sourceId).setUrl(mangaUrl).build()
-        return RecordKey.newBuilder()
-            .setHistory(
-                xyz.altaf.kioku.sync.proto.HistoryKey.newBuilder()
-                    .setManga(manga)
-                    .setChapterUrl(chapterUrl),
-            )
-            .build()
-    }
-
-    fun category(syncId: String): RecordKey = RecordKey.newBuilder()
-        .setCategory(
-            xyz.altaf.kioku.sync.proto.CategoryKey.newBuilder().setId(syncId),
+    fun chapter(sourceId: Long, mangaUrl: String, chapterUrl: String): RecordKey = RecordKey.newBuilder()
+        .setChapter(
+            ChapterKey.newBuilder()
+                .setManga(mangaKey(sourceId, mangaUrl))
+                .setUrl(chapterUrl),
         )
         .build()
 
-    fun track(sourceId: Long, mangaUrl: String, trackerId: Long): RecordKey {
-        val manga = MangaKey.newBuilder().setSourceId(sourceId).setUrl(mangaUrl).build()
-        return RecordKey.newBuilder()
-            .setTrack(
-                xyz.altaf.kioku.sync.proto.TrackKey.newBuilder()
-                    .setManga(manga)
-                    .setTrackerId(trackerId),
-            )
-            .build()
-    }
+    fun history(sourceId: Long, mangaUrl: String, chapterUrl: String): RecordKey = RecordKey.newBuilder()
+        .setHistory(
+            HistoryKey.newBuilder()
+                .setManga(mangaKey(sourceId, mangaUrl))
+                .setChapterUrl(chapterUrl),
+        )
+        .build()
+
+    fun category(syncId: String): RecordKey = RecordKey.newBuilder()
+        .setCategory(CategoryKey.newBuilder().setId(syncId))
+        .build()
+
+    fun track(sourceId: Long, mangaUrl: String, trackerId: Long): RecordKey = RecordKey.newBuilder()
+        .setTrack(
+            TrackKey.newBuilder()
+                .setManga(mangaKey(sourceId, mangaUrl))
+                .setTrackerId(trackerId),
+        )
+        .build()
 
     fun preference(key: String): RecordKey = RecordKey.newBuilder()
         .setPreference(key)
@@ -73,7 +67,7 @@ object RecordKeys {
 
     fun sourcePreference(source: String, pref: String): RecordKey = RecordKey.newBuilder()
         .setSourcePreference(
-            xyz.altaf.kioku.sync.proto.SourcePrefKey.newBuilder()
+            SourcePrefKey.newBuilder()
                 .setSource(source)
                 .setPref(pref),
         )
@@ -85,5 +79,10 @@ object RecordKeys {
 
     fun sourceName(sourceId: Long): RecordKey = RecordKey.newBuilder()
         .setSourceName(sourceId)
+        .build()
+
+    private fun mangaKey(sourceId: Long, url: String): MangaKey = MangaKey.newBuilder()
+        .setSourceId(sourceId)
+        .setUrl(url)
         .build()
 }
