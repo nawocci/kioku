@@ -18,9 +18,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import eu.kanade.tachiyomi.sync.SyncSettingsViewModel
 import eu.kanade.tachiyomi.sync.SyncStatus
 import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.rounded.QrCodeScanner
@@ -44,11 +46,7 @@ import kotlin.time.Instant
 // way.
 
 /** A pairing session is running or waiting on a user answer. */
-fun SyncStatus.isPairingBusy(): Boolean = this is SyncStatus.Connecting ||
-    this is SyncStatus.ApplyingSnapshot ||
-    this is SyncStatus.UploadingLibrary ||
-    this is SyncStatus.MergeConfirmation ||
-    this is SyncStatus.AwaitingReview
+fun SyncStatus.isPairingBusy(): Boolean = pairingBusy
 
 /** The plain status line, shown wherever the current sync state matters. */
 @Composable
@@ -135,6 +133,37 @@ fun SyncStatusDialogs(
             )
         }
         else -> {}
+    }
+}
+
+/**
+ * The pairing form, shown wherever pairing can start. State lives in the view
+ * model, so the Settings screen and the onboarding step show the same form with
+ * the same scan prefill and the same errors.
+ */
+@Composable
+fun SyncPairingDialogHost(
+    viewModel: SyncSettingsViewModel,
+    onScanQr: () -> Unit,
+) {
+    val state by viewModel.state.collectAsState()
+    val status by viewModel.status.collectAsState()
+    if (!state.showPairingDialog) return
+
+    // Keyed on the prefill: state restoration does not validate rememberSaveable
+    // inputs against what was saved, so without this a scan would restore the
+    // fields saved before the camera opened.
+    val prefill = state.scanPrefill
+    key(prefill) {
+        SyncPairingDialog(
+            initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
+            initialApiKey = prefill?.second ?: state.apiKey.orEmpty(),
+            error = state.error,
+            busy = status.isPairingBusy(),
+            onPair = viewModel::pair,
+            onDismiss = viewModel::dismissPairingDialog,
+            onScanQr = onScanQr,
+        )
     }
 }
 
@@ -282,12 +311,10 @@ private fun isInsecureHttp(url: String): Boolean {
 @Composable
 internal fun relativeTime(instant: Instant): String {
     val seconds = (Clock.System.now() - instant).inWholeSeconds
-    return remember(seconds) {
-        when {
-            seconds < 60 -> "just now"
-            seconds < 3600 -> "${seconds / 60} min ago"
-            seconds < 86400 -> "${seconds / 3600} h ago"
-            else -> "${seconds / 86400} d ago"
-        }
+    return when {
+        seconds < 60 -> stringResource(MR.strings.sync_time_just_now)
+        seconds < 3600 -> stringResource(MR.strings.sync_time_minutes_ago, seconds / 60)
+        seconds < 86400 -> stringResource(MR.strings.sync_time_hours_ago, seconds / 3600)
+        else -> stringResource(MR.strings.sync_time_days_ago, seconds / 86400)
     }
 }

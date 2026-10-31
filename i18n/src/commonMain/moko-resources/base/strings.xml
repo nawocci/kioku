@@ -1123,6 +1123,10 @@
     <string name="sync_status_uploading">Sending this device\'s library to the server…</string>
     <string name="sync_insecure_http">This address uses plain HTTP; anything between this device and the server can read or change what syncs, including the API key. Prefer HTTPS, or keep the server on a private network.</string>
     <string name="sync_last_activity">Last sync activity %1$s</string>
+    <string name="sync_time_just_now">just now</string>
+    <string name="sync_time_minutes_ago">%1$d min ago</string>
+    <string name="sync_time_hours_ago">%1$d h ago</string>
+    <string name="sync_time_days_ago">%1$d d ago</string>
     <string name="sync_group_server">Server</string>
     <string name="sync_group_device">Device</string>
     <string name="sync_group_data">Data</string>

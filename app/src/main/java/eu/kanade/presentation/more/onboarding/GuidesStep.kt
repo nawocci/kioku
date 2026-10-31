@@ -11,7 +11,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -19,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import dev.zacsweers.metrox.viewmodel.metroViewModel
-import eu.kanade.presentation.more.sync.SyncPairingDialog
+import eu.kanade.presentation.more.sync.SyncPairingDialogHost
 import eu.kanade.presentation.more.sync.SyncQrScannerScreen
 import eu.kanade.presentation.more.sync.SyncStatusDialogs
 import eu.kanade.presentation.more.sync.isPairingBusy
@@ -97,25 +96,10 @@ private fun SyncSetupSection() {
     // The form's visibility lives in the view model, shared with the Settings
     // screen: a scan that returns here reopens it prefilled, and a failed
     // pairing keeps it open with the error instead of closing it.
-    if (state.showPairingDialog) {
-        val prefill = state.scanPrefill
-        // Keyed on the prefill: state restoration does not validate
-        // rememberSaveable inputs against what was saved, so without this a
-        // scan would restore the fields saved before the camera opened.
-        key(prefill) {
-            SyncPairingDialog(
-                initialServerUrl = prefill?.first ?: state.serverUrl.orEmpty(),
-                initialApiKey = prefill?.second ?: state.apiKey.orEmpty(),
-                error = state.error,
-                busy = status.isPairingBusy(),
-                onPair = viewModel::pair,
-                onDismiss = viewModel::dismissPairingDialog,
-                onScanQr = {
-                    viewModel.dismissPairingDialog()
-                    navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
-                },
-            )
-        }
+    SyncPairingDialogHost(viewModel = viewModel) {
+        // The form closes for the camera and reopens prefilled with the scan.
+        viewModel.dismissPairingDialog()
+        navigator.push(SyncQrScannerScreen(viewModel::openPairingDialog))
     }
 
     Text(stringResource(MR.strings.onboarding_sync_question))
