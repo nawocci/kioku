@@ -325,6 +325,43 @@ class SyncEngine(
 
     suspend fun setSyncPrivate(enabled: Boolean) {
         syncDb.syncQueries.setSyncPrivate(enabled)
+        // Nothing to retract before the first pairing: the server has not seen
+        // any of these values.
+        if (enabled || !isPaired()) return
+
+        // Values that already reached the server are removed everywhere rather
+        // than left behind. The record positions name them, which also covers
+        // sources that are no longer installed — their preference files are
+        // gone, but their values on the server are not.
+        syncDb.syncQueries.getRecordKeys().awaitAsList().forEach { canonKey ->
+            val key = runCatching { RecordKey.parseFrom(canonKey) }.getOrNull() ?: return@forEach
+            val pref = when (key.kindCase) {
+                RecordKey.KindCase.PREFERENCE -> key.preference
+                RecordKey.KindCase.SOURCE_PREFERENCE -> key.sourcePreference.pref
+                else -> return@forEach
+            }
+            if (!Preference.isPrivate(pref)) return@forEach
+
+            // The resolver decides whether anything is left to retract: a
+            // record already stored as a tombstone is skipped there.
+            if (key.kindCase == RecordKey.KindCase.PREFERENCE) {
+                database.syncQueries.enqueueOutbox(
+                    RecordTypes.PREFERENCE.toLong(),
+                    null,
+                    null,
+                    key.preference,
+                    null,
+                )
+            } else {
+                database.syncQueries.enqueueOutbox(
+                    RecordTypes.SOURCE_PREFERENCE.toLong(),
+                    null,
+                    null,
+                    key.sourcePreference.pref,
+                    key.sourcePreference.source,
+                )
+            }
+        }
     }
 
     /** Runs one catch-up session in the background of the app. */

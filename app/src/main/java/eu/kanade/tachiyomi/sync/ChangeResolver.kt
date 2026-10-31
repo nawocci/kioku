@@ -202,12 +202,20 @@ class ChangeResolver(
         }
     }
 
-    private fun resolvePreference(key: String, source: String?, clock: Hlc): Change? {
-        if (!preferenceWorthSyncing(key)) return null
+    private suspend fun resolvePreference(key: String, source: String?, clock: Hlc): Change? {
         val recordKey = if (source == null) {
             RecordKeys.preference(key)
         } else {
             RecordKeys.sourcePreference(source, key)
+        }
+        if (!preferenceWorthSyncing(key)) {
+            // A value that was synced before and may not be synced now (private
+            // settings turned off) is retracted everywhere instead of being left
+            // behind; one that never left this device has nothing to retract.
+            // A record already stored as a tombstone has no hash, so this does
+            // not re-send the tombstone on every local change to the value.
+            val record = syncDb.syncQueries.getRecord(recordKey.toByteArray()).awaitAsOneOrNull()
+            return if (record != null && record.value_hash != null) tombstone(recordKey, clock) else null
         }
         val value = if (source == null) {
             appPreferences.all[key]

@@ -60,15 +60,23 @@ CREATE TABLE sync_records(
     value_hash TEXT
 );
 
+-- The hash is only set for preference records, whose value can be compared to
+-- tell an echo of a remote apply from a local edit. A tombstone carries none,
+-- which is what marks the record as already retracted.
 upsertRecord:
 INSERT INTO sync_records(canon_key, wall, counter, device, value_hash)
 VALUES (:canonKey, :wall, :counter, :device, :valueHash)
 ON CONFLICT (canon_key) DO UPDATE SET
     wall = excluded.wall, counter = excluded.counter, device = excluded.device,
-    value_hash = coalesce(excluded.value_hash, sync_records.value_hash);
+    value_hash = excluded.value_hash;
 
 getRecord:
 SELECT * FROM sync_records WHERE canon_key = :canonKey;
+
+-- The canonical keys alone: enough to retract a record, and a fraction of the
+-- rows' size on a large library.
+getRecordKeys:
+SELECT canon_key FROM sync_records;
 
 deleteRecord:
 DELETE FROM sync_records WHERE canon_key = :canonKey;
