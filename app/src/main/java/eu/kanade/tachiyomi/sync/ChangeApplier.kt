@@ -11,7 +11,6 @@ import kotlinx.serialization.json.JsonObject
 import logcat.LogPriority
 import mihon.core.common.extensions.toJsonObject
 import tachiyomi.data.Database
-import tachiyomi.domain.manga.model.Manga
 import xyz.altaf.kioku.sync.proto.CategoryState
 import xyz.altaf.kioku.sync.proto.Change
 import xyz.altaf.kioku.sync.proto.ChapterKey
@@ -45,10 +44,10 @@ import tachiyomi.core.common.util.system.logcat as logcatFn
  *    replays the batch, whose clock-guarded re-apply converges.
  *
  * Two modes:
- *  - [Mode.LIVE] for steady-state events: the server has already resolved
+ *  - [SyncMode.LIVE] for steady-state events: the server has already resolved
  *    the winner, so values replace local ones. History still unions, since a
  *    read anywhere is a read.
- *  - [Mode.PAIRING] for the first snapshot onto a device that has its own
+ *  - [SyncMode.PAIRING] for the first snapshot onto a device that has its own
  *    data: backup-restore semantics — favorites and reads union, tracking
  *    takes the furthest progress, details only replace what was never
  *    initialized, preferences follow the server.
@@ -58,8 +57,6 @@ class ChangeApplier(
     private val appContext: Context,
     private val database: Database,
 ) {
-
-    enum class Mode { LIVE, PAIRING }
 
     /**
      * Manga the snapshot holds favorited that this device does not, reported
@@ -92,7 +89,7 @@ class ChangeApplier(
      * Applies [changes] in order. All database writes land or none of them
      * does; preference writes follow after a successful commit.
      */
-    suspend fun applyBatch(changes: List<Change>, mode: Mode): PairingReport {
+    suspend fun applyBatch(changes: List<Change>, mode: SyncMode): PairingReport {
         val entries = mutableListOf<ReviewEntry>()
         val memberships = mutableListOf<DeferredMembership>()
         val prefs = mutableListOf<DeferredPref>()
@@ -115,7 +112,7 @@ class ChangeApplier(
 
     private suspend fun apply(
         change: Change,
-        mode: Mode,
+        mode: SyncMode,
         memberships: MutableList<DeferredMembership>,
         prefs: MutableList<DeferredPref>,
     ): ReviewEntry? {
@@ -168,7 +165,7 @@ class ChangeApplier(
         mangaKey: MangaKey,
         state: MangaState,
         modified: Hlc,
-        mode: Mode,
+        mode: SyncMode,
         memberships: MutableList<DeferredMembership>,
     ): ReviewEntry? {
         val existing = database.syncQueries.getMangaRow(mangaKey.sourceId, mangaKey.url)
@@ -183,19 +180,13 @@ class ChangeApplier(
             return null
         }
 
-        val favoriteAt = if (mode == Mode.PAIRING && !state.hasFavoriteAt()) {
-            // Either side favoriting keeps the entry; a restore unions them
-            // with the earliest known time.
-            existing.user_favorite_at
-        } else if (mode == Mode.PAIRING) {
-            listOfNotNull(existing.user_favorite_at, Instant.fromEpochMilliseconds(state.favoriteAt))
-                .filter { it > Manga.UNKNOWN_FAVORITE_AT }
-                .minOrNull()
-        } else {
-            if (state.hasFavoriteAt()) Instant.fromEpochMilliseconds(state.favoriteAt) else null
-        }
+        val favoriteAt = SyncMerge.favoriteAt(
+            mode = mode,
+            existing = existing.user_favorite_at,
+            incoming = if (state.hasFavoriteAt()) Instant.fromEpochMilliseconds(state.favoriteAt) else null,
+        )
 
-        val detailsWin = mode == Mode.LIVE || existing.state_initialized || !state.initialized
+        val detailsWin = mode == SyncMode.LIVE || existing.state_initialized || !state.initialized
         database.mangaQueries.updateFromBackup(
             userFavoriteAt = favoriteAt,
             remoteArtist = if (detailsWin) state.artist else null,
@@ -213,14 +204,14 @@ class ChangeApplier(
             id = existing.id,
             remoteUpdateStrategy = updateStrategy(state.updateStrategy),
             userNotes = state.notes,
-            remoteMemo = if (mode == Mode.PAIRING) {
+            remoteMemo = if (mode == SyncMode.PAIRING) {
                 JsonObject(state.memo.toByteArray().toJsonObject() + existing.remote_memo)
             } else {
                 state.memo.toByteArray().toJsonObject()
             },
         )
         memberships += DeferredMembership(mangaKey, state.categoriesList)
-        return if (mode == Mode.PAIRING && state.hasFavoriteAt() && existing.user_favorite_at == null) {
+        return if (mode == SyncMode.PAIRING && state.hasFavoriteAt() && existing.user_favorite_at == null) {
             ReviewEntry(state.title, mangaKey.sourceId, mangaKey.url, modified)
         } else {
             null
@@ -278,7 +269,7 @@ class ChangeApplier(
         mangaKey: MangaKey,
         chapterKey: ChapterKey,
         state: ChapterState,
-        mode: Mode,
+        mode: SyncMode,
     ) {
         val chapterId = database.syncQueries.getChapterIdByKey(
             mangaKey.sourceId,
@@ -313,20 +304,16 @@ class ChangeApplier(
         }
 
         val existing = database.chapterQueries.getChapterById(chapterId).awaitAsOne()
-        val (read, bookmark, lastPageRead) = if (mode == Mode.PAIRING) {
-            Triple(
-                state.read || existing.user_read,
-                state.bookmark || existing.user_bookmark,
-                maxOf(state.lastPageRead, existing.user_last_page_read),
-            )
-        } else {
-            Triple(state.read, state.bookmark, state.lastPageRead)
-        }
+        val merged = SyncMerge.chapterUserState(
+            mode = mode,
+            existing = ChapterUserState(existing.user_read, existing.user_bookmark, existing.user_last_page_read),
+            incoming = ChapterUserState(state.read, state.bookmark, state.lastPageRead),
+        )
 
         database.syncQueries.updateSyncChapter(
-            read = read,
-            bookmark = bookmark,
-            lastPageRead = lastPageRead,
+            read = merged.read,
+            bookmark = merged.bookmark,
+            lastPageRead = merged.lastPageRead,
             id = chapterId,
         )
     }
@@ -361,15 +348,16 @@ class ChangeApplier(
 
         // The upsert adds durations, so the union is fed as the difference
         // from the stored value, exactly as a restore does.
-        val readAt = listOfNotNull(
-            if (state.hasReadAt()) Instant.fromEpochMilliseconds(state.readAt) else null,
-            existing.read_at,
-        ).maxOrNull()
-        val duration = maxOf(state.readDuration, existing.read_duration) - existing.read_duration
+        val (readAt, readDuration) = SyncMerge.history(
+            existingReadAt = existing.read_at,
+            existingDuration = existing.read_duration,
+            incomingReadAt = if (state.hasReadAt()) Instant.fromEpochMilliseconds(state.readAt) else null,
+            incomingDuration = state.readDuration,
+        )
         database.historyQueries.upsert(
             chapterId = chapterId,
             readAt = readAt,
-            readDuration = duration,
+            readDuration = readDuration - existing.read_duration,
         )
     }
 
@@ -379,7 +367,7 @@ class ChangeApplier(
         mangaKey: MangaKey,
         trackKey: TrackKey,
         state: TrackState,
-        mode: Mode,
+        mode: SyncMode,
     ) {
         val mangaId = database.syncQueries.getMangaIdByKey(mangaKey.sourceId, mangaKey.url).awaitAsOneOrNull()
             ?: return
@@ -389,7 +377,7 @@ class ChangeApplier(
             trackKey.trackerId,
         ).awaitAsOneOrNull()
 
-        if (existing == null || mode == Mode.LIVE) {
+        if (existing == null || mode == SyncMode.LIVE) {
             database.manga_trackQueries.upsert(
                 mangaId = mangaId,
                 trackerId = trackKey.trackerId,
@@ -409,7 +397,7 @@ class ChangeApplier(
         }
 
         // A restore only moves tracking forward.
-        if (state.lastChapterRead > existing.last_chapter_read) {
+        if (SyncMerge.trackAdvances(mode, existing.last_chapter_read, state.lastChapterRead)) {
             database.manga_trackQueries.update(
                 mangaId = mangaId,
                 trackerId = null,

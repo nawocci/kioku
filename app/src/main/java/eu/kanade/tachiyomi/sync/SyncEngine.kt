@@ -515,7 +515,7 @@ class SyncEngine(
         clock: HlcClock,
         interactive: Boolean,
     ): HlcClock {
-        val mode = if (paired) ChangeApplier.Mode.LIVE else ChangeApplier.Mode.PAIRING
+        val mode = if (paired) SyncMode.LIVE else SyncMode.PAIRING
         val serverRecords = hello.snapshotRecords.toInt()
         status.value = SyncStatus.ApplyingSnapshot(serverRecords)
 
@@ -820,7 +820,7 @@ class SyncEngine(
             val localClock = HlcClock.hlc(local.wall, local.counter, local.device)
             if (compareClocks(change.modified, localClock) <= 0) return false
         }
-        applier.applyBatch(listOf(change), ChangeApplier.Mode.LIVE)
+        applier.applyBatch(listOf(change), SyncMode.LIVE)
         return true
     }
 
