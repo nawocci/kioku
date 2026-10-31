@@ -292,19 +292,22 @@ class ChangeApplier(
                 // chapters; one that still has no manga is dropped here and
                 // arrives again with the manga on the next sync.
                 ?: return
+            // The record carries user state only, and this device has not
+            // fetched the chapter yet. It is created as a placeholder the next
+            // source refresh fills in, so the read state is not lost with it.
             database.chapterQueries.insertReturningId(
                 mangaId = mangaId,
                 remoteUrl = chapterKey.url,
-                remoteName = state.name,
-                remoteScanlator = state.scanlator.ifEmpty { null },
+                remoteName = chapterKey.url,
+                remoteScanlator = null,
                 userRead = state.read,
                 userBookmark = state.bookmark,
                 userLastPageRead = state.lastPageRead,
-                remoteChapterNumber = state.number,
-                remoteOrder = state.order,
+                remoteChapterNumber = 0.0,
+                remoteOrder = 0,
                 stateDateFetch = Instant.DISTANT_PAST,
-                remoteDateUpload = if (state.hasDateUpload()) Instant.fromEpochMilliseconds(state.dateUpload) else null,
-                remoteMemo = state.memo.toByteArray().toJsonObject(),
+                remoteDateUpload = null,
+                remoteMemo = JsonObject(emptyMap()),
             ).awaitAsOneOrNull()
             return
         }
@@ -324,12 +327,6 @@ class ChangeApplier(
             read = read,
             bookmark = bookmark,
             lastPageRead = lastPageRead,
-            name = state.name,
-            scanlator = state.scanlator.ifEmpty { null },
-            number = state.number,
-            dateUpload = if (state.hasDateUpload()) Instant.fromEpochMilliseconds(state.dateUpload) else null,
-            order = state.order,
-            memo = state.memo.toByteArray().toJsonObject(),
             id = chapterId,
         )
     }

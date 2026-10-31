@@ -38,6 +38,7 @@ import xyz.altaf.kioku.sync.db.SyncDatabase
 import xyz.altaf.kioku.sync.proto.Ack
 import xyz.altaf.kioku.sync.proto.Change
 import xyz.altaf.kioku.sync.proto.Frame
+import xyz.altaf.kioku.sync.proto.HelloResponse
 import xyz.altaf.kioku.sync.proto.Pong
 import xyz.altaf.kioku.sync.proto.RecordKey
 import xyz.altaf.kioku.sync.proto.SnapshotResponse
@@ -375,9 +376,7 @@ class SyncEngine(
             prefWatcher.start(sourcePrefKeys())
 
             if (hello.snapshotRequired) {
-                connection.send(snapshotRequestFrame())
-                val frame = awaitSnapshot(connection)
-                clock = applySnapshot(frame.snapshotResponse!!, meta.paired, clock, interactive)
+                clock = applySnapshot(connection, hello, meta.paired, clock, interactive)
             }
 
             status.value = SyncStatus.Online(WallClock.System.now())
@@ -422,14 +421,15 @@ class SyncEngine(
     }
 
     /**
-     * Waits for the snapshot, answering pings meanwhile. The snapshot phase
-     * carries no other frames.
+     * Waits for one snapshot page, answering pings meanwhile. The snapshot
+     * phase carries no other frames.
      */
-    private suspend fun awaitSnapshot(connection: SyncConnection): Frame {
+    private suspend fun awaitSnapshotPage(connection: SyncConnection): SnapshotResponse {
         while (true) {
             val frame = connection.receive() ?: throw SyncException("connection closed")
             when (frame.bodyCase) {
-                Frame.BodyCase.SNAPSHOT_RESPONSE -> return frame
+                Frame.BodyCase.SNAPSHOT_RESPONSE ->
+                    return frame.snapshotResponse ?: throw SyncException("empty snapshot page")
                 Frame.BodyCase.PING -> connection.send(
                     Frame.newBuilder().setPong(Pong.newBuilder().setWallMs(frame.ping.wallMs)).build(),
                 )
@@ -439,21 +439,26 @@ class SyncEngine(
     }
 
     /**
-     * Applies a snapshot: pairing merges backup-style, a catch-up snapshot
-     * replaces per the clock. Returns the clock observed in it.
+     * Applies the snapshot page by page: pairing merges backup-style, a
+     * catch-up snapshot replaces per the clock. Returns the clock observed in
+     * it.
      */
     private suspend fun applySnapshot(
-        snapshot: SnapshotResponse,
+        connection: SyncConnection,
+        hello: HelloResponse,
         paired: Boolean,
         clock: HlcClock,
         interactive: Boolean,
     ): HlcClock {
         val mode = if (paired) ChangeApplier.Mode.LIVE else ChangeApplier.Mode.PAIRING
-        status.value = SyncStatus.ApplyingSnapshot(snapshot.recordsCount)
+        val serverRecords = hello.snapshotRecords.toInt()
+        status.value = SyncStatus.ApplyingSnapshot(serverRecords)
 
-        if (!paired && interactive && snapshot.recordsCount > 0) {
+        // The size rides with the hello, so a device pairing into a non-empty
+        // library asks about the merge before the first page is requested.
+        if (!paired && interactive && serverRecords > 0) {
             val localCount = localLibraryCount()
-            if (localCount > 0 && !confirmMerge(snapshot.recordsCount, localCount)) {
+            if (localCount > 0 && !confirmMerge(serverRecords, localCount)) {
                 // Nothing was applied; the device keeps its data and the
                 // server keeps its library, and the user can retry with a
                 // fresh key or after clearing one side.
@@ -461,20 +466,31 @@ class SyncEngine(
             }
         }
 
-        val report = applier.applyBatch(snapshot.recordsList, mode)
-        val observed = clock
-        snapshot.recordsList.forEach { observed.observe(it.modified) }
-        syncDb.syncQueries.setHlc(observed.wall, observed.counter)
-        snapshot.recordsList.forEach { rememberRecord(it) }
-        syncDb.syncQueries.setLastSeq(snapshot.latestSeq)
+        connection.send(snapshotRequestFrame())
+        val entries = mutableListOf<ChangeApplier.ReviewEntry>()
+        var latestSeq = 0L
+        while (true) {
+            val page = awaitSnapshotPage(connection)
+            // Applied as it lands: the database is never held for a whole
+            // snapshot, and a large library is never resident at once.
+            entries += applier.applyBatch(page.recordsList, mode).entries
+            page.recordsList.forEach {
+                clock.observe(it.modified)
+                rememberRecord(it)
+            }
+            latestSeq = page.latestSeq
+            if (page.last) break
+        }
+        syncDb.syncQueries.setHlc(clock.wall, clock.counter)
+        syncDb.syncQueries.setLastSeq(latestSeq)
 
-        if (paired) return observed
+        if (paired) return clock
 
-        val removeEverywhere = if (report.entries.isNotEmpty() && interactive) {
-            logcat { "KiokuSync pairing review for ${report.entries.size} server-only favorites" }
+        val removeEverywhere = if (entries.isNotEmpty() && interactive) {
+            logcat { "KiokuSync pairing review for ${entries.size} server-only favorites" }
             val review = CompletableDeferred<Boolean>()
             pairingReview = review
-            status.value = SyncStatus.AwaitingReview(report.entries)
+            status.value = SyncStatus.AwaitingReview(entries)
             val answer = review.await()
             pairingReview = null
             answer
@@ -493,11 +509,11 @@ class SyncEngine(
         // so the dump does not carry them, and their unfavorites must be queued
         // explicitly. Anything queued before the dump would be dropped with it.
         if (removeEverywhere) {
-            unfavoriteEverywhere(report.entries)
+            unfavoriteEverywhere(entries)
         }
 
         syncDb.syncQueries.markPaired()
-        return observed
+        return clock
     }
 
     /**

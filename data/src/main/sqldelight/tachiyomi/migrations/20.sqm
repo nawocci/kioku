@@ -93,29 +93,16 @@ BEGIN
     VALUES (1, old.source_id, old.remote_url);
 END;
 
-CREATE TRIGGER sync_chapter_insert AFTER INSERT ON chapter
-WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
-BEGIN
-    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
-    SELECT 2, m.source_id, m.remote_url, new.remote_url
-    FROM manga m
-    WHERE m.id = new.manga_id;
-END;
-
--- state_date_fetch changes on every refresh of every chapter, so it is not a
--- signal; everything else the record carries is.
+-- Only the user state of a chapter syncs: its metadata comes back from the
+-- source on every refresh, so capturing it turned a library refresh into
+-- thousands of records. A new chapter is not a user change at all, which is
+-- why there is no insert trigger.
 CREATE TRIGGER sync_chapter_update AFTER UPDATE ON chapter
 WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
 AND (
     old.user_read IS NOT new.user_read
     OR old.user_bookmark IS NOT new.user_bookmark
     OR old.user_last_page_read IS NOT new.user_last_page_read
-    OR old.remote_name IS NOT new.remote_name
-    OR old.remote_scanlator IS NOT new.remote_scanlator
-    OR old.remote_chapter_number IS NOT new.remote_chapter_number
-    OR old.remote_date_upload IS NOT new.remote_date_upload
-    OR old.remote_order IS NOT new.remote_order
-    OR old.remote_memo IS NOT new.remote_memo
 )
 BEGIN
     INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)

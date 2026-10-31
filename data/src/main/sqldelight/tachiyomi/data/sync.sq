@@ -55,13 +55,16 @@ DELETE FROM sync_category_map;
 -- getSyncMangaKeys, the only place that decides what is worth carrying); the
 -- children then follow those rows, so a large library seeds with one statement
 -- per record type instead of a query and an insert per entry.
+-- Only chapters with user state belong in the dump; an untouched chapter has
+-- no record at all.
 seedDumpChapters:
 INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
 SELECT 2, o.manga_source, o.manga_url, c.remote_url
 FROM sync_outbox o
 JOIN manga m ON m.source_id = o.manga_source AND m.remote_url = o.manga_url
 JOIN chapter c ON c.manga_id = m.id
-WHERE o.record_type = 1;
+WHERE o.record_type = 1
+  AND (c.user_read = 1 OR c.user_bookmark = 1 OR c.user_last_page_read != 0);
 
 seedDumpHistory:
 INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
@@ -153,37 +156,17 @@ OR EXISTS (
     WHERE o.record_type = 1 AND o.manga_source = m.source_id AND o.manga_url = m.remote_url
 );
 
+-- A chapter record carries user state only; its metadata belongs to the source.
 getSyncChapter:
 SELECT
     c.user_read,
     c.user_bookmark,
-    c.user_last_page_read,
-    c.remote_name,
-    c.remote_scanlator,
-    c.remote_chapter_number,
-    c.remote_date_upload,
-    c.remote_order,
-    c.remote_memo,
-    m.source_id AS mangaSource,
-    m.remote_url AS mangaUrl,
-    c.remote_url AS url
+    c.user_last_page_read
 FROM chapter c
 JOIN manga m ON m.id = c.manga_id
 WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :url;
 
-getSyncChapterExists:
-SELECT EXISTS(
-    SELECT 1
-    FROM chapter c
-    JOIN manga m ON m.id = c.manga_id
-    WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :url
-);
 
-getSyncChapterKeysForManga:
-SELECT c.remote_url
-FROM chapter c
-JOIN manga m ON m.id = c.manga_id
-WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl;
 
 getSyncHistory:
 SELECT
@@ -197,12 +180,6 @@ JOIN chapter c ON c.id = h.chapter_id
 JOIN manga m ON m.id = c.manga_id
 WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND c.remote_url = :chapterUrl;
 
-getSyncHistoryKeysForManga:
-SELECT c.remote_url
-FROM history h
-JOIN chapter c ON c.id = h.chapter_id
-JOIN manga m ON m.id = c.manga_id
-WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl;
 
 getSyncTrack:
 SELECT
@@ -225,19 +202,7 @@ FROM manga_track t
 JOIN manga m ON m.id = t.manga_id
 WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND t.tracker_id = :trackerId;
 
-getSyncTrackExists:
-SELECT EXISTS(
-    SELECT 1
-    FROM manga_track t
-    JOIN manga m ON m.id = t.manga_id
-    WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl AND t.tracker_id = :trackerId
-);
 
-getSyncTrackKeysForManga:
-SELECT t.tracker_id
-FROM manga_track t
-JOIN manga m ON m.id = t.manga_id
-WHERE m.source_id = :sourceId AND m.remote_url = :mangaUrl;
 
 getSyncCategory:
 SELECT c.name, c.`order`, c.flags, scm.sync_id
@@ -245,14 +210,7 @@ FROM category c
 JOIN sync_category_map scm ON scm.category_id = c.id
 WHERE scm.sync_id = :syncId;
 
-getSyncCategoryExists:
-SELECT EXISTS(
-    SELECT 1 FROM sync_category_map scm JOIN category c ON c.id = scm.category_id
-    WHERE scm.sync_id = :syncId
-);
 
-getSyncCategoryIds:
-SELECT sync_id FROM sync_category_map;
 
 getSyncSourceName:
 SELECT name, language FROM source WHERE id = :id;
@@ -262,8 +220,6 @@ SELECT index_url, name, badge_label, signing_key, contact_website, contact_disco
 FROM extension_store
 WHERE index_url = :indexUrl;
 
-getSyncExtensionStoreExists:
-SELECT EXISTS(SELECT 1 FROM extension_store WHERE index_url = :indexUrl);
 
 -- Local category id for a sync id, used when applying membership.
 getSyncCategoryId:
@@ -300,13 +256,7 @@ updateSyncChapter:
 UPDATE chapter
 SET user_read = :read,
     user_bookmark = :bookmark,
-    user_last_page_read = :lastPageRead,
-    remote_name = :name,
-    remote_scanlator = :scanlator,
-    remote_chapter_number = :number,
-    remote_date_upload = :dateUpload,
-    remote_order = :order,
-    remote_memo = :memo
+    user_last_page_read = :lastPageRead
 WHERE id = :id;
 
 updateSyncCategory:
@@ -387,29 +337,16 @@ BEGIN
     VALUES (1, old.source_id, old.remote_url);
 END;
 
-CREATE TRIGGER sync_chapter_insert AFTER INSERT ON chapter
-WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
-BEGIN
-    INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)
-    SELECT 2, m.source_id, m.remote_url, new.remote_url
-    FROM manga m
-    WHERE m.id = new.manga_id;
-END;
-
--- state_date_fetch changes on every refresh of every chapter, so it is not a
--- signal; everything else the record carries is.
+-- Only the user state of a chapter syncs: its metadata comes back from the
+-- source on every refresh, so capturing it turned a library refresh into
+-- thousands of records. A new chapter is not a user change at all, which is
+-- why there is no insert trigger.
 CREATE TRIGGER sync_chapter_update AFTER UPDATE ON chapter
 WHEN (SELECT suppress FROM sync_apply WHERE id = 0) IS 0
 AND (
     old.user_read IS NOT new.user_read
     OR old.user_bookmark IS NOT new.user_bookmark
     OR old.user_last_page_read IS NOT new.user_last_page_read
-    OR old.remote_name IS NOT new.remote_name
-    OR old.remote_scanlator IS NOT new.remote_scanlator
-    OR old.remote_chapter_number IS NOT new.remote_chapter_number
-    OR old.remote_date_upload IS NOT new.remote_date_upload
-    OR old.remote_order IS NOT new.remote_order
-    OR old.remote_memo IS NOT new.remote_memo
 )
 BEGIN
     INSERT OR REPLACE INTO sync_outbox(record_type, manga_source, manga_url, extra)

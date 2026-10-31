@@ -7,7 +7,7 @@ package xyz.altaf.kioku.sync
  * exchanged. It changes only when the wire format or the semantics of an
  * existing message change; see PROTOCOL.md in kioku-sync.
  */
-const val PROTOCOL_VERSION = "1"
+const val PROTOCOL_VERSION = "2"
 
 /** The header carrying the protocol version on the WebSocket handshake. */
 const val PROTOCOL_HEADER = "X-Kioku-Sync-Protocol"

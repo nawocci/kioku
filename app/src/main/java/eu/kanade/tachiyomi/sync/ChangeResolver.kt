@@ -105,18 +105,16 @@ class ChangeResolver(
         if (!mangaSyncable(sourceId, mangaUrl)) return null
         val row = database.syncQueries.getSyncChapter(sourceId, mangaUrl, url).awaitAsOneOrNull()
             ?: return tombstone(RecordKeys.chapter(sourceId, mangaUrl, url), clock)
+        // A chapter's metadata belongs to the source and comes back from a
+        // refresh, so only user state is worth a record. A chapter nobody
+        // touched has nothing to say.
+        if (!row.user_read && !row.user_bookmark && row.user_last_page_read == 0) return null
         return build(RecordKeys.chapter(sourceId, mangaUrl, url), clock) {
             setChapter(
                 ChapterState.newBuilder().apply {
                     read = row.user_read
                     bookmark = row.user_bookmark
                     lastPageRead = row.user_last_page_read
-                    name = row.remote_name
-                    scanlator = row.remote_scanlator.orEmpty()
-                    number = row.remote_chapter_number
-                    row.remote_date_upload?.let { dateUpload = it.toEpochMilliseconds() }
-                    order = row.remote_order
-                    memo = ByteString.copyFrom(row.remote_memo.toByteArray())
                 },
             )
         }

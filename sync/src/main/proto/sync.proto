@@ -102,18 +102,14 @@ message MangaState {
 }
 
 message ChapterState {
-  // User state
+  // User state only. A chapter's metadata belongs to the source: it comes back
+  // from a refresh, so syncing it turned every refresh into thousands of
+  // records. Numbers 4-9 carried that snapshot and stay reserved.
   bool read = 1;
   bool bookmark = 2;
   int32 last_page_read = 3;
 
-  // Metadata snapshot
-  string name = 4;
-  string scanlator = 5; // absent = unknown
-  double number = 6;
-  optional int64 date_upload = 7; // epoch ms; absent = unknown
-  int64 order = 8;
-  bytes memo = 9;
+  reserved 4 to 9;
 }
 
 message HistoryState {
@@ -232,15 +228,21 @@ message HelloResponse {
   int64 server_time_ms = 2;
   bool snapshot_required = 3;
   string error = 4; // non-empty = the session is rejected
+  // How many records a snapshot would carry, so a device pairing into a
+  // non-empty library can ask about the merge before anything is transferred.
+  int64 snapshot_records = 5;
 }
 
 message SnapshotRequest {}
 
 message SnapshotResponse {
-  // Current state of every record, including tombstones, so that pairing
-  // devices see server-side deletions instead of resurrecting them.
+  // One page of the current state of every record, including tombstones, so
+  // that pairing devices see server-side deletions instead of resurrecting
+  // them. Pages arrive in order; the client applies each as it lands.
   repeated Change records = 1;
   int64 latest_seq = 2;
+  // Set on the final page, which may carry no records.
+  bool last = 3;
 }
 
 message Ping {
