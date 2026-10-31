@@ -1,26 +1,30 @@
 package eu.kanade.tachiyomi.sync
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
 /**
  * The pairing QR payload shown on the server dashboard:
  * {"v":1,"url":"https://sync.example.com","key":"kioku_…"}.
  *
- * The fields are validated on parse so a random QR the camera happens to
+ * The fields are validated after parsing so a random QR the camera happens to
  * read can never reach the pairing form.
  */
 data class SyncQrPayload(val serverUrl: String, val apiKey: String) {
     companion object {
+        private val json = Json { ignoreUnknownKeys = true }
         private val URL_REGEX = Regex("""^https?://[^\s/]+(:\d+)?/?$""")
 
         fun parse(text: String): SyncQrPayload? {
-            val trimmed = text.trim()
-            if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null
-            val url = Regex(""""url"\s*:\s*"([^"]+)"""").find(trimmed)?.groupValues?.get(1)
+            val payload = runCatching { json.decodeFromString<QrJson>(text.trim()) }.getOrNull()
                 ?: return null
-            val key = Regex(""""key"\s*:\s*"([^"]+)"""").find(trimmed)?.groupValues?.get(1)
-                ?: return null
-            if (!URL_REGEX.matches(url)) return null
-            if (!key.startsWith("kioku_")) return null
-            return SyncQrPayload(url.trimEnd('/'), key)
+            if (!URL_REGEX.matches(payload.url)) return null
+            if (!payload.key.startsWith("kioku_")) return null
+            return SyncQrPayload(payload.url.trimEnd('/'), payload.key)
         }
     }
 }
+
+/** The wire shape of the pairing QR; extra fields are ignored. */
+@Serializable
+private data class QrJson(val v: Int = 1, val url: String, val key: String)
