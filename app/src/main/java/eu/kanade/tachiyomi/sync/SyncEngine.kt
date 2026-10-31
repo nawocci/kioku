@@ -27,6 +27,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
 import mihon.core.metro.AppCoroutineScope
+import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.Database
 import tachiyomi.domain.source.service.SourceManager
@@ -181,12 +182,32 @@ class SyncEngine(
      */
     fun pairWithKey(serverUrl: String, key: String, onDone: (Result<Unit>) -> Unit) {
         pairingJob?.cancel()
+        // A live session holds the session mutex for as long as its socket
+        // stays open, and pairing needs that mutex to swap libraries. Stopping
+        // the loop here also means the pairing socket becomes the live one.
+        sessionJob?.cancel()
+        sessionJob = null
         pairingJob = scope.launch {
             val opened = try {
                 val url = serverUrl.trim().trimEnd('/')
-                syncDb.syncQueries.upsertServer(url, key.trim())
+                val secret = key.trim()
                 status.value = SyncStatus.Connecting
-                sessionMutex.withLock { openSession(interactive = true) }
+                sessionMutex.withLock {
+                    val identity = identity()
+                    val sameLibrary = identity.paired &&
+                        identity.serverUrl == url &&
+                        identity.apiKey == secret
+                    if (!sameLibrary) {
+                        if (identity.paired) {
+                            // A different library: what this device knew about
+                            // the previous one means nothing there.
+                            logcat { "KiokuSync pairing with a different library" }
+                            forgetLibrary()
+                        }
+                        syncDb.syncQueries.upsertServer(url, secret)
+                    }
+                    openSession(interactive = true)
+                }
             } catch (e: CancellationException) {
                 // This job was cancelled (stop(), or the user closing the
                 // dialog) or a timeout inside the session fired. Only the
@@ -269,9 +290,22 @@ class SyncEngine(
         // the session's own failure handling takes care of the rest.
         withTimeoutOrNull(5.seconds) { sessionMutex.withLock {} }
         syncDb.syncQueries.clearServer()
+        forgetLibrary()
+        status.value = SyncStatus.NotPaired
+    }
+
+    /**
+     * Drops everything this device knew about the library it was paired with:
+     * the position in its event log, the per-record clocks, the pending
+     * changes, and the category ids minted against it. The local library stays
+     * untouched — the next session pulls the server state again.
+     */
+    private suspend fun forgetLibrary() {
         syncDb.syncQueries.clearRecords()
         database.syncQueries.clearOutbox()
-        status.value = SyncStatus.NotPaired
+        // Category mappings point at local ids that a fresh snapshot re-creates.
+        database.syncQueries.clearCategoryMap()
+        syncDb.syncQueries.setLastSeq(0)
     }
 
     /**
@@ -285,13 +319,7 @@ class SyncEngine(
             action()
         } finally {
             database.syncQueries.setSuppress(SUPPRESS_OFF)
-            syncDb.syncQueries.setLastSeq(0)
-            syncDb.syncQueries.clearRecords()
-            database.syncQueries.clearOutbox()
-            // Category mappings minted before the clear can point at rows
-            // that no longer exist; dropping them lets the server state
-            // recreate its categories here.
-            database.syncQueries.clearCategoryMap()
+            forgetLibrary()
         }
     }
 

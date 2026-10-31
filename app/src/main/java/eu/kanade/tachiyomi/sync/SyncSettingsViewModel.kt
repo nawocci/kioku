@@ -71,11 +71,10 @@ class SyncSettingsViewModel(
     fun pair(serverUrl: String, key: String) {
         _state.value = _state.value.copy(error = null)
         viewModelScope.launch {
-            // Pairing over an existing pairing means the server changed: go
-            // through a fresh pairing, so the snapshot merge and review
-            // confirmations apply to the new server rather than being
-            // skipped by the already-paired path.
-            if (engine.isPaired()) engine.unpair()
+            // The engine decides whether these credentials name a different
+            // library than the one this device already knows: re-entering the
+            // same server and key is a reconnect, a different pair is a fresh
+            // pairing with its merge and review steps.
             engine.pairWithKey(serverUrl, key) { result ->
                 val failure = result.exceptionOrNull()
                 _state.value = _state.value.copy(

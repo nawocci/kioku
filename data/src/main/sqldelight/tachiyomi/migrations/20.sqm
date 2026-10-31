@@ -1,5 +1,11 @@
 -- Kioku sync: capture tables and triggers.
 --
+-- This is the only migration the fork adds, and it upgrades a Mihon database
+-- to Kioku: there is no earlier Kioku schema, and the fork keeps upstream's
+-- schema files (and their CREATE statements) untouched so upstream merges
+-- stay clean. Until Kioku has shipped a release, this file may still be
+-- edited in place; after that, changes belong in a new migration.
+--
 -- Writes to the user-facing tables leave a row in `sync_outbox`, keyed by the
 -- record they changed; the sync engine drains the outbox, resolves each row's
 -- current state, and pushes it. Rows are inserted OR REPLACE, so a burst of
