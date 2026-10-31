@@ -27,6 +27,10 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only the pairing QR scanner uses the camera, and pairing is optional. -->
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission
         android:name="android.permission.READ_APP_SPECIFIC_LOCALES"
